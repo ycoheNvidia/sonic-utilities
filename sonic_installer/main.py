@@ -567,6 +567,14 @@ def install(url, force, skip_platform_check=False, skip_migration=False, skip_pa
                 "Aborting...", LOG_ERR)
             raise click.Abort()
 
+        # Verify image signature by default (in sonic there will be a flag here)
+        echo_and_log("Verifing image {} signature...".format(binary_image_version))
+        if not _verify_signature(image_path):
+            echo_and_log('Error: Failed verify image signature', LOG_ERR)
+            raise click.Abort()
+        else:
+            echo_and_log('Verification successful')
+
         echo_and_log("Installing image {} and setting it as default...".format(binary_image_version))
         with SWAPAllocator(not skip_setup_swap, swap_mem_size, total_mem_threshold, available_mem_threshold):
             bootloader.install_image(image_path)
@@ -948,6 +956,23 @@ def verify_next_image():
         echo_and_log('Image verification failed', LOG_ERR)
         sys.exit(1)
     click.echo('Image successfully verified')
+
+
+def _verify_signature(image_path):
+    script_path = os.path.join('usr', 'local', 'bin', 'verify_image_sign.sh')
+    if not os.path.exists(script_path):
+        echo_and_log("No need to verify mock image")
+        return True
+    verification_result = subprocess.Popen([script_path, image_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = verification_result.communicate()
+    if verification_result.returncode != 0:
+        echo_and_log(stdout, LOG_ERR)
+        echo_and_log(stderr, LOG_ERR)
+    else:
+        echo_and_log(stdout)
+        echo_and_log(stderr)
+    return verification_result.returncode == 0
+
 
 if __name__ == '__main__':
     sonic_installer()
