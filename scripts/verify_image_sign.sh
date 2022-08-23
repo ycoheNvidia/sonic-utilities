@@ -14,7 +14,7 @@ else
     exit 0
 fi
 
-. /usr/local/bin/verify_image_common.sh
+. /usr/local/bin/verify_image_sign_common.sh
 
 if [ ${SECURE_UPGRADE_ENABLED} -eq 0 ]; then
     echo "secure boot not enabled - exiting without image verification"

@@ -959,18 +959,19 @@ def verify_next_image():
 
 
 def _verify_signature(image_path):
-    script_path = os.path.join('usr', 'local', 'bin', 'verify_image_sign.sh')
+    verification_script_name = 'verify_image_sign.sh'
+    script_path = os.path.join('/usr', 'local', 'bin', verification_script_name)
     if not os.path.exists(script_path):
-        echo_and_log("No need to verify mock image")
-        return True
+        script_path = os.path.join(os.path.dirname(__file__), '..', 'scripts', verification_script_name)
+        if not os.path.exists(script_path):
+            echo_and_log("Unable to find verification script")
+            return False
     verification_result = subprocess.Popen([script_path, image_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = verification_result.communicate()
     if verification_result.returncode != 0:
-        echo_and_log(stdout, LOG_ERR)
-        echo_and_log(stderr, LOG_ERR)
+        echo_and_log(str(stdout) + " " + str(stderr), LOG_ERR)
     else:
-        echo_and_log(stdout)
-        echo_and_log(stderr)
+        echo_and_log(str(stdout) + " " + str(stderr))
     return verification_result.returncode == 0
 
 
