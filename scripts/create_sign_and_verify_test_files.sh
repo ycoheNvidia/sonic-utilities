@@ -64,7 +64,7 @@ sed -i "/payload_sha1=/c\payload_sha1=2f1bbd5a0d411253103e688e4e66c00c94bedd40" 
 
 tmp_image=$tmp_dir/"tmp_image.bin"
 echo "this is a different image now" >> $mock_image
-sh $DIR/create_mock_image.sh $repo_dir $mock_image $tmp_image $cert_file $key_file || { #TODO modify mock image instead of adding new signature
+sh $DIR/create_mock_image.sh $repo_dir $mock_image $tmp_image $cert_file $key_file || {
     echo "Error: unable to create mock image"   
     clean_up 1
 }
@@ -85,9 +85,7 @@ cat ${tmp_sig} >> ${test_image_3}
 
 # test_image_4 = modified image with original mock image signature
 test_image_4=$out_dir/"test_image_4.bin"
-tmp_sig2="${tmp_dir}/tmp_sig2.sig"
 head -c $SIG_PAYLOAD_SIZE $output_file > $test_image_4
 echo "this is additional line" >> $test_image_4
-sed -e '1,/^exit_marker$/d' $output_file | tail -c +$(( $TAR_SIZE + 1 )) > $tmp_sig2
 cat ${tmp_sig} >> ${test_image_4}
 clean_up 0

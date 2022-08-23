@@ -567,7 +567,7 @@ def install(url, force, skip_platform_check=False, skip_migration=False, skip_pa
                 "Aborting...", LOG_ERR)
             raise click.Abort()
 
-        # Verify image signature by default (in sonic there will be a flag here)
+        # Calling verification script by default - signature will be checked if enabled in bios
         echo_and_log("Verifing image {} signature...".format(binary_image_version))
         if not _verify_signature(image_path):
             echo_and_log('Error: Failed verify image signature', LOG_ERR)
