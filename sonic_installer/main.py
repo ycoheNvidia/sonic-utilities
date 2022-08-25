@@ -502,7 +502,8 @@ def sonic_installer():
 @click.option('-y', '--yes', is_flag=True, callback=abort_if_false,
               expose_value=False, prompt='New image will be installed, continue?')
 @click.option('-f', '--force', '--skip-secure-check', is_flag=True,
-              help="Force installation of an image of a non-secure type than secure running image")
+              help="Force installation of an image of a non-secure type than secure running image,
+              this flag does not affect secure upgrade image verification")
 @click.option('--skip-platform-check', is_flag=True,
               help="Force installation of an image of a type which is not of the same platform")
 @click.option('--skip_migration', is_flag=True,
