@@ -31,6 +31,7 @@ def test_install(run_command, run_command_or_raise, get_bootloader, swap, fs):
     mock_bootloader.get_binary_image_version = Mock(return_value=new_image_version)
     mock_bootloader.get_installed_images = Mock(return_value=[current_image_version])
     mock_bootloader.get_image_path = Mock(return_value=new_image_folder)
+    mock_bootloader.verify_image_sign = Mock(return_value=True)
 
     @contextmanager
     def rootfs_path_mock(path):

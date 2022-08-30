@@ -570,7 +570,7 @@ def install(url, force, skip_platform_check=False, skip_migration=False, skip_pa
 
         # Calling verification script by default - signature will be checked if enabled in bios
         echo_and_log("Verifing image {} signature...".format(binary_image_version))
-        if not _verify_signature(image_path):
+        if not bootloader.verify_image_sign(image_path):
             echo_and_log('Error: Failed verify image signature', LOG_ERR)
             raise click.Abort()
         else:
@@ -957,23 +957,6 @@ def verify_next_image():
         echo_and_log('Image verification failed', LOG_ERR)
         sys.exit(1)
     click.echo('Image successfully verified')
-
-
-def _verify_signature(image_path):
-    verification_script_name = 'verify_image_sign.sh'
-    script_path = os.path.join('/usr', 'local', 'bin', verification_script_name)
-    if not os.path.exists(script_path):
-        script_path = os.path.join(os.path.dirname(__file__), '..', 'scripts', verification_script_name)
-        if not os.path.exists(script_path):
-            echo_and_log("Unable to find verification script")
-            return False
-    verification_result = subprocess.Popen([script_path, image_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    stdout, stderr = verification_result.communicate()
-    if verification_result.returncode != 0:
-        echo_and_log(str(stdout) + " " + str(stderr), LOG_ERR)
-    else:
-        echo_and_log(str(stdout) + " " + str(stderr))
-    return verification_result.returncode == 0
 
 
 if __name__ == '__main__':
