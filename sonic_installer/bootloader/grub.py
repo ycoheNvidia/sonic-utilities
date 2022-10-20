@@ -154,6 +154,7 @@ class GrubBootloader(OnieInstallerBootloader):
         return self.platform_in_platforms_asic(platform, image_path)
 
     def verify_image_sign(self, image_path):
+        click.echo('Verifying image signature')
         verification_script_name = 'verify_image_sign.sh'
         script_path = os.path.join('/usr', 'local', 'bin', verification_script_name)
         if not os.path.exists(script_path):
