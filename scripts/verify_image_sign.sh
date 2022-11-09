@@ -25,7 +25,7 @@ clean_up ()
 {
     if  [ -d ${EFI_CERTS_DIR} ]; then rm -rf ${EFI_CERTS_DIR}; fi
     if  [ -d "${TMP_DIR}" ]; then rm -rf ${TMP_DIR}; fi
-    exit $?
+    exit $1
 }
 
 TMP_DIR=$(mktemp -d)
@@ -63,13 +63,13 @@ for file in $(ls $EFI_CERTS_DIR | grep "db-"); do
     LOG=$(verify_image_sign_common $image_file $DATA_FILE $CMS_SIG_FILE)
     VALIDATION_RES=$?
     if [ $VALIDATION_RES -eq 0 ]; then
-        RESULT="CMS Verified OK this is using efi keys"
+        RESULT="CMS Verified OK using efi keys"
         echo "verification ok:$RESULT"
         # No need to continue.
         # Exit without error if any success signature verification.
         clean_up 0
     fi
 done
-echo "Error: image not verified $LOG"
+echo "Failure: CMS signature Verification Failed: $LOG"
 
 clean_up 1

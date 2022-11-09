@@ -21,7 +21,7 @@ RESULT="CMS Verification Failure"
 LOG=$(openssl cms -verify $no_check_time -noout -CAfile $EFI_CERTS_DIR/cert.pem -binary -in ${CMS_SIG_FILE} -content ${DATA_FILE} -inform pem 2>&1 > /dev/null )
 VALIDATION_RES=$?
 if [ $VALIDATION_RES -eq 0 ]; then
-    RESULT="CMS Verified OK this is using efi keys"
+    RESULT="CMS Verified OK"
     if  [ -d "${TMP_DIR}" ]; then rm -rf ${TMP_DIR}; fi
     echo "verification ok:$RESULT"
     # No need to continue.
