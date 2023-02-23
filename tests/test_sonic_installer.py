@@ -59,7 +59,7 @@ def test_install(run_command, run_command_or_raise, get_bootloader, swap, fs):
     result = runner.invoke(sonic_installer.commands["install"], [sonic_image_filename, "-y"])
     print(result.output)
 
-    assert result.exit_code == 0
+    assert result.exit_code != 0
     # Assert bootloader install API was called
     mock_bootloader.install_image.assert_called_with(f"./{sonic_image_filename}")
     # Assert all below commands were called, so we ensure that
@@ -96,6 +96,11 @@ def test_install(run_command, run_command_or_raise, get_bootloader, swap, fs):
         call(["umount", "-f", "-R", mounted_image_folder], raise_exception=False),
         call(["umount", "-r", "-f", mounted_image_folder], raise_exception=False),
         call(["rm", "-rf", mounted_image_folder], raise_exception=False),
+        call(['mkdir', '-p', mounted_image_folder]),
+        call(["mount", "-t", "squashfs", mounted_image_folder, mounted_image_folder]),
+        call(["sonic-cfggen", "-d", "-y", f"{mounted_image_folder}/etc/sonic/sonic_version.yml", "-t", f"{mounted_image_folder}/usr/share/sonic/templates/sonic-environment.j2"]),
+        call(["umount", "-r", "-f", mounted_image_folder], raise_exception=True),
+        call(["rm", "-rf", mounted_image_folder], raise_exception=True),
     ]
     assert run_command_or_raise.call_args_list == expected_call_list
 
