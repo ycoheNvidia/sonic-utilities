@@ -53,6 +53,13 @@ def test_install(run_command, run_command_or_raise, get_bootloader, swap, fs):
     print(result.output)
 
     assert result.exit_code != 0
+    mock_bootloader_verify_image_sign_not_implemented = mock_bootloader
+    mock_bootloader_verify_image_sign_not_implemented.verify_image_sign = Mock(side_effect=AttributeError)
+    get_bootloader.return_value=mock_bootloader_verify_image_sign_not_implemented
+    result = runner.invoke(sonic_installer.commands["install"], [sonic_image_filename, "-y"])
+    print(result.output)
+
+    assert result.exit_code == 0
     # Assert bootloader install API was called
     mock_bootloader.install_image.assert_called_with(f"./{sonic_image_filename}")
     # Assert all below commands were called, so we ensure that
