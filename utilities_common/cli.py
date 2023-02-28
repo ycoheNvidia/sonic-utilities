@@ -294,7 +294,7 @@ def is_port_router_interface(config_db, port):
 
     interface_table = config_db.get_table('INTERFACE')
     for intf in interface_table:
-        if port == intf[0]:
+        if port == intf:
             return True
 
     return False
@@ -304,7 +304,7 @@ def is_pc_router_interface(config_db, pc):
 
     pc_interface_table = config_db.get_table('PORTCHANNEL_INTERFACE')
     for intf in pc_interface_table:
-        if pc == intf[0]:
+        if pc == intf:
             return True
 
     return False
@@ -529,7 +529,9 @@ def run_command(command, display_cmd=False, ignore_error=False, return_cmd=False
 
     # No conversion needed for intfutil commands as it already displays
     # both SONiC interface name and alias name for all interfaces.
-    if get_interface_naming_mode() == "alias" and not command.startswith("intfutil"):
+    # IP route table cannot be handled in function run_command_in_alias_mode since it is in JSON format 
+    # with a list for next hops 
+    if get_interface_naming_mode() == "alias" and not command.startswith("intfutil") and not re.search("show ip|ipv6 route", command):
         run_command_in_alias_mode(command)
         sys.exit(0)
 
@@ -537,7 +539,7 @@ def run_command(command, display_cmd=False, ignore_error=False, return_cmd=False
 
     if return_cmd:
         output = proc.communicate()[0]
-        return output
+        return output, proc.returncode
 
     if not interactive_mode:
         (out, err) = proc.communicate()

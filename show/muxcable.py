@@ -1,3 +1,4 @@
+
 import json
 import sys
 import time
@@ -96,6 +97,51 @@ def check_port_in_mux_cable_table(port):
         return True
     return False
 
+
+
+def get_per_port_firmware(port):
+
+    state_db = {}
+    mux_info_dict = {}
+    mux_info_full_dict = {}
+
+    # Getting all front asic namespace and correspding config and state DB connector
+
+    namespaces = multi_asic.get_front_end_namespaces()
+    for namespace in namespaces:
+        asic_id = multi_asic.get_asic_index_from_namespace(namespace)
+        state_db[asic_id] = swsscommon.SonicV2Connector(use_unix_socket_path=False, namespace=namespace)
+        state_db[asic_id].connect(state_db[asic_id].STATE_DB)
+
+    if platform_sfputil is not None:
+        asic_index = platform_sfputil_helper.get_asic_id_for_logical_port(port)
+
+    if asic_index is None:
+        # TODO this import is only for unit test purposes, and should be removed once sonic_platform_base
+        # is fully mocked
+        import sonic_platform_base.sonic_sfp.sfputilhelper
+        asic_index = sonic_platform_base.sonic_sfp.sfputilhelper.SfpUtilHelper().get_asic_id_for_logical_port(port)
+        if asic_index is None:
+            click.echo("Got invalid asic index for port {}, cant retrieve mux cable table entries".format(port))
+            return False
+
+
+    mux_info_full_dict[asic_index] = state_db[asic_index].get_all(
+        state_db[asic_index].STATE_DB, 'MUX_CABLE_INFO|{}'.format(port))
+
+    res_dir = {}
+    res_dir = mux_info_full_dict[asic_index]
+    mux_info_dict["version_nic_active"] = res_dir.get("version_nic_active", None)
+    mux_info_dict["version_nic_inactive"] = res_dir.get("version_nic_inactive", None)
+    mux_info_dict["version_nic_next"] = res_dir.get("version_nic_next", None)
+    mux_info_dict["version_peer_active"] = res_dir.get("version_peer_active", None)
+    mux_info_dict["version_peer_inactive"] = res_dir.get("version_peer_inactive", None)
+    mux_info_dict["version_peer_next"] = res_dir.get("version_peer_next", None)
+    mux_info_dict["version_self_active"] = res_dir.get("version_self_active", None)
+    mux_info_dict["version_self_inactive"] = res_dir.get("version_self_inactive", None)
+    mux_info_dict["version_self_next"] = res_dir.get("version_self_next", None)
+
+    return mux_info_dict
 
 def get_response_for_version(port, mux_info_dict):
     state_db = {}
@@ -503,7 +549,7 @@ def create_json_dump_per_port_config(db, port_status_dict, per_npu_configdb, asi
     if soc_ipv4_value is not None:
         port_status_dict["MUX_CABLE"]["PORTS"][port_name]["SERVER"]["soc_ipv4"] = soc_ipv4_value
 
-def get_tunnel_route_per_port(db, port_tunnel_route, per_npu_configdb, per_npu_appl_db, asic_id, port):
+def get_tunnel_route_per_port(db, port_tunnel_route, per_npu_configdb, per_npu_appl_db, per_npu_asic_db, asic_id, port):
 
     mux_cfg_dict = per_npu_configdb[asic_id].get_all(
     per_npu_configdb[asic_id].CONFIG_DB, 'MUX_CABLE|{}'.format(port))
@@ -513,24 +559,31 @@ def get_tunnel_route_per_port(db, port_tunnel_route, per_npu_configdb, per_npu_a
         dest_address = mux_cfg_dict.get(name, None)
 
         if dest_address is not None:
-            route_keys = per_npu_appl_db[asic_id].keys(
+            kernel_route_keys = per_npu_appl_db[asic_id].keys(
                 per_npu_appl_db[asic_id].APPL_DB, 'TUNNEL_ROUTE_TABLE:*{}'.format(dest_address))
-            
-            if route_keys is not None and len(route_keys):
+            if_kernel_tunnel_route_programed = kernel_route_keys is not None and len(kernel_route_keys)
 
+            asic_route_keys = per_npu_asic_db[asic_id].keys(
+                per_npu_asic_db[asic_id].ASIC_DB, 'ASIC_STATE:SAI_OBJECT_TYPE_ROUTE_ENTRY:*{}*'.format(dest_address))
+            if_asic_tunnel_route_programed = asic_route_keys is not None and len(asic_route_keys)
+
+            if if_kernel_tunnel_route_programed or if_asic_tunnel_route_programed:
                 port_tunnel_route["TUNNEL_ROUTE"][port] = port_tunnel_route["TUNNEL_ROUTE"].get(port, {})
                 port_tunnel_route["TUNNEL_ROUTE"][port][name] = {}
                 port_tunnel_route["TUNNEL_ROUTE"][port][name]['DEST'] = dest_address
 
-def create_json_dump_per_port_tunnel_route(db, port_tunnel_route, per_npu_configdb, per_npu_appl_db, asic_id, port):
+                port_tunnel_route["TUNNEL_ROUTE"][port][name]['kernel'] = if_kernel_tunnel_route_programed
+                port_tunnel_route["TUNNEL_ROUTE"][port][name]['asic'] = if_asic_tunnel_route_programed
 
-    get_tunnel_route_per_port(db, port_tunnel_route, per_npu_configdb, per_npu_appl_db,  asic_id, port)
+def create_json_dump_per_port_tunnel_route(db, port_tunnel_route, per_npu_configdb, per_npu_appl_db, per_npu_asic_db, asic_id, port):
 
-def create_table_dump_per_port_tunnel_route(db, print_data, per_npu_configdb, per_npu_appl_db, asic_id, port):
+    get_tunnel_route_per_port(db, port_tunnel_route, per_npu_configdb, per_npu_appl_db, per_npu_asic_db, asic_id, port)
+
+def create_table_dump_per_port_tunnel_route(db, print_data, per_npu_configdb, per_npu_appl_db, per_npu_asic_db, asic_id, port):
 
     port_tunnel_route = {}
     port_tunnel_route["TUNNEL_ROUTE"] = {}
-    get_tunnel_route_per_port(db, port_tunnel_route, per_npu_configdb, per_npu_appl_db,  asic_id, port)
+    get_tunnel_route_per_port(db, port_tunnel_route, per_npu_configdb, per_npu_appl_db, per_npu_asic_db, asic_id, port)
 
     for port, route in port_tunnel_route["TUNNEL_ROUTE"].items():
         for dest_name, values in route.items():
@@ -538,6 +591,8 @@ def create_table_dump_per_port_tunnel_route(db, print_data, per_npu_configdb, pe
             print_line.append(port)
             print_line.append(dest_name)
             print_line.append(values['DEST'])
+            print_line.append('added' if values['kernel'] else '-')
+            print_line.append('added' if values['asic'] else '-')
             print_data.append(print_line)
 
 @muxcable.command()
@@ -1528,7 +1583,7 @@ def version(db, port, active):
     delete_all_keys_in_db_table("STATE_DB", "XCVRD_SHOW_FW_RSP")
     delete_all_keys_in_db_table("STATE_DB", "XCVRD_SHOW_FW_RES")
 
-    if port is not None:
+    if port is not None and port != "all":
 
         res_dict = {}
         mux_info_dict, mux_info_active_dict = {}, {}
@@ -1561,6 +1616,65 @@ def version(db, port, active):
             click.echo("{}".format(json.dumps(mux_info_active_dict, indent=4)))
         else:
             click.echo("{}".format(json.dumps(mux_info_dict, indent=4)))
+
+    elif port == "all" and port is not None:
+
+        logical_port_list = platform_sfputil_helper.get_logical_list()
+
+        rc_exit = True
+
+        for port in logical_port_list:
+
+            if platform_sfputil is not None:
+                physical_port_list = platform_sfputil_helper.logical_port_name_to_physical_port_list(port)
+
+            if not isinstance(physical_port_list, list):
+                continue
+            if len(physical_port_list) != 1:
+                continue
+
+            if not check_port_in_mux_cable_table(port):
+                continue
+
+            physical_port = physical_port_list[0]
+           
+            logical_port_list_for_physical_port = platform_sfputil_helper.get_physical_to_logical()
+
+            logical_port_list_per_port = logical_port_list_for_physical_port.get(physical_port, None)
+
+            """ This check is required for checking whether or not this logical port is the one which is
+            actually mapped to physical port and by convention it is always the first port.
+            TODO: this should be removed with more logic to check which logical port maps to actual physical port
+            being used"""
+
+            if port != logical_port_list_per_port[0]:
+                continue
+
+
+            port = platform_sfputil_helper.get_interface_alias(port, db)
+            
+            mux_info_dict = get_per_port_firmware(port)
+            if not isinstance(mux_info_dict, dict):
+                mux_info_dict = {}
+                rc_exit = False
+             
+            mux_info = {}
+            mux_info_active_dict = {}
+            if active is True:
+                for key in mux_info_dict:
+                    if key.endswith("_active"):
+                        mux_info_active_dict[key] = mux_info_dict[key]
+                mux_info[port] = mux_info_active_dict
+                click.echo("{}".format(json.dumps(mux_info, indent=4)))
+            else:
+                mux_info[port] = mux_info_dict
+                click.echo("{}".format(json.dumps(mux_info, indent=4)))
+            
+            if rc_exit == False:
+                sys.exit(EXIT_FAIL)
+
+        sys.exit(CONFIG_SUCCESSFUL)
+
     else:
         port_name = platform_sfputil_helper.get_interface_name(port, db)
         click.echo("Did not get a valid Port for mux firmware version".format(port_name))
@@ -1640,6 +1754,7 @@ def metrics(db, port, json_output):
 def event_log(db, port, json_output):
     """Show muxcable event log <port>"""
 
+    click.confirm(('Muxcable at port {} will retreive cable logs from MCU, Caution: approx wait time could be ~2 minutes Continue?'.format(port)), abort=True)
     port = platform_sfputil_helper.get_interface_name(port, db)
     delete_all_keys_in_db_table("APPL_DB", "XCVRD_EVENT_LOG_CMD")
     delete_all_keys_in_db_table("STATE_DB", "XCVRD_EVENT_LOG_RSP")
@@ -1735,7 +1850,7 @@ def packetloss(db, port, json_output):
     for namespace in namespaces:
         asic_id = multi_asic.get_asic_index_from_namespace(namespace)
 
-        per_npu_statedb[asic_id] = swsscommon.SonicV2Connector(use_unix_socket_path=True, namespace=namespace)
+        per_npu_statedb[asic_id] = swsscommon.SonicV2Connector(use_unix_socket_path=False, namespace=namespace)
         per_npu_statedb[asic_id].connect(per_npu_statedb[asic_id].STATE_DB)
 
         pckloss_table_keys[asic_id] = per_npu_statedb[asic_id].keys(
@@ -1798,6 +1913,7 @@ def tunnel_route(db, port, json_output):
     port = platform_sfputil_helper.get_interface_name(port, db)
 
     per_npu_appl_db = {}
+    per_npu_asic_db = {}
     per_npu_configdb = {}
     mux_tbl_keys = {}
 
@@ -1807,6 +1923,9 @@ def tunnel_route(db, port, json_output):
 
         per_npu_appl_db[asic_id] = swsscommon.SonicV2Connector(use_unix_socket_path=False, namespace=namespace)
         per_npu_appl_db[asic_id].connect(per_npu_appl_db[asic_id].APPL_DB)
+
+        per_npu_asic_db[asic_id] = swsscommon.SonicV2Connector(use_unix_socket_path=False, namespace=namespace)
+        per_npu_asic_db[asic_id].connect(per_npu_asic_db[asic_id].ASIC_DB)
 
         per_npu_configdb[asic_id] = swsscommon.SonicV2Connector(use_unix_socket_path=False, namespace=namespace)
         per_npu_configdb[asic_id].connect(per_npu_configdb[asic_id].CONFIG_DB) 
@@ -1841,16 +1960,16 @@ def tunnel_route(db, port, json_output):
                 port_tunnel_route = {}
                 port_tunnel_route["TUNNEL_ROUTE"] = {}
 
-                create_json_dump_per_port_tunnel_route(db, port_tunnel_route, per_npu_configdb, per_npu_appl_db, asic_index, port)
+                create_json_dump_per_port_tunnel_route(db, port_tunnel_route, per_npu_configdb, per_npu_appl_db, per_npu_asic_db, asic_index, port)
 
                 click.echo("{}".format(json.dumps(port_tunnel_route, indent=4)))
 
             else:
                 print_data = []
 
-                create_table_dump_per_port_tunnel_route(db, print_data, per_npu_configdb, per_npu_appl_db, asic_index, port)
+                create_table_dump_per_port_tunnel_route(db, print_data, per_npu_configdb, per_npu_appl_db, per_npu_asic_db, asic_index, port)
 
-                headers = ['PORT', 'DEST_TYPE', 'DEST_ADDRESS']
+                headers = ['PORT', 'DEST_TYPE', 'DEST_ADDRESS', 'kernel', 'asic']
 
                 click.echo(tabulate(print_data, headers=headers))
         else:
@@ -1866,7 +1985,7 @@ def tunnel_route(db, port, json_output):
                 for key in natsorted(mux_tbl_keys[asic_id]):
                     port = key.split("|")[1]
 
-                    create_json_dump_per_port_tunnel_route(db, port_tunnel_route, per_npu_configdb, per_npu_appl_db, asic_id, port)
+                    create_json_dump_per_port_tunnel_route(db, port_tunnel_route, per_npu_configdb, per_npu_appl_db, per_npu_asic_db, asic_id, port)
             
             click.echo("{}".format(json.dumps(port_tunnel_route, indent=4)))
         else:
@@ -1877,9 +1996,9 @@ def tunnel_route(db, port, json_output):
                 for key in natsorted(mux_tbl_keys[asic_id]):
                     port = key.split("|")[1]
             
-                    create_table_dump_per_port_tunnel_route(db, print_data, per_npu_configdb, per_npu_appl_db, asic_id, port)
+                    create_table_dump_per_port_tunnel_route(db, print_data, per_npu_configdb, per_npu_appl_db, per_npu_asic_db, asic_id, port)
 
-            headers = ['PORT', 'DEST_TYPE', 'DEST_ADDRESS']
+            headers = ['PORT', 'DEST_TYPE', 'DEST_ADDRESS', 'kernel', 'asic']
 
             click.echo(tabulate(print_data, headers=headers))
 

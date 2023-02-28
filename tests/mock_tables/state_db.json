@@ -49,7 +49,9 @@
         "tx1power": "N/A",
         "tx2power": "N/A",
         "tx3power": "N/A",
-        "tx4power": "N/A",
+        "tx4power": "N/A"
+    },
+    "TRANSCEIVER_DOM_THRESHOLD|Ethernet0": {
         "rxpowerhighalarm": "3.4001",
         "rxpowerhighwarning": "2.4000",
         "rxpowerlowalarm": "-13.5067",
@@ -74,7 +76,7 @@
         "manufacturer": "INNOLIGHT",
         "model": "C-DQ8FNM010-N00",
         "vendor_oui": "44-7c-7f",
-        "vendor_date": "2020-05-22 ",
+        "vendor_date": "2020-05-22",
         "connector": "No separable connector",
         "encoding": "Not supported for CMIS cables",
         "ext_identifier": "Power Class 1(10.0W Max)",
@@ -83,7 +85,7 @@
         "cable_length": "10",
         "specification_compliance": "Not supported for CMIS cables",
         "nominal_bit_rate": "Not supported for CMIS cables",
-        "application_advertisement": "400GAUI-8 C2M (Annex 120E) - Active Cable assembly with BER < 2.6x10^-4\n\t\t\t\t   IB EDR (Arch.Spec.Vol.2) - Active Cable assembly with BER < 5x10^-5\n\t\t\t\t   IB QDR (Arch.Spec.Vol.2) - Active Cable assembly with BER < 10^-12\n\t\t\t\t   "
+        "application_advertisement": "400GAUI-8 C2M (Annex 120E) - Active Cable assembly with BER < 2.6x10^-4\n\t\t\t\t   IB EDR (Arch.Spec.Vol.2) - Active Cable assembly with BER < 5x10^-5\n\t\t\t\t   IB QDR (Arch.Spec.Vol.2) - Active Cable assembly with BER < 10^-12"
     },
     "TRANSCEIVER_DOM_SENSOR|Ethernet8": {
         "temperature": "44.9883",
@@ -111,7 +113,9 @@
         "tx5power": "1.175",
         "tx6power": "1.175",
         "tx7power": "1.175",
-        "tx8power": "1.175",
+        "tx8power": "1.175"
+    },
+    "TRANSCEIVER_DOM_THRESHOLD|Ethernet8": {
         "rxpowerhighalarm": "6.9999",
         "rxpowerhighwarning": "4.9999",
         "rxpowerlowalarm": "-11.9044",
@@ -205,6 +209,170 @@
         "nominal_bit_rate": "N/A",
         "application_advertisement": "N/A"
     },
+    "TRANSCEIVER_INFO|Ethernet40": {
+        "type": "QSFP-DD Double Density 8X Pluggable Transceiver",
+        "vendor_rev": "2A",
+        "serial": "INKAO2900002A",
+        "manufacturer": "INNOLIGHT",
+        "model": "C-DQ8FNM010-N00",
+        "vendor_oui": "44-7c-7f",
+        "vendor_date": "2020-05-22",
+        "connector": "No separable connector",
+        "encoding": "Not supported for CMIS cables",
+        "ext_identifier": "Power Class 1(10.0W Max)",
+        "ext_rateselect_compliance": "Not supported for CMIS cables",
+        "cable_type": "Length Cable Assembly(m)",
+        "cable_length": "10",
+        "specification_compliance": "Not supported for CMIS cables",
+        "nominal_bit_rate": "Not supported for CMIS cables",
+        "application_advertisement": "{1: {'host_electrical_interface_id': '400G CR8', 'module_media_interface_id': 'Copper cable', 'media_lane_count': 8, 'host_lane_count': 8, 'host_lane_assignment_options': 1, 'media_lane_assignment_options': 2}, 2: {'host_electrical_interface_id': '200GBASE-CR4 (Clause 136)'}}"
+    },
+    "TRANSCEIVER_DOM_THRESHOLD|Ethernet44":{
+        "temphighalarm": "80.0",
+        "templowalarm": "-5.0",
+        "temphighwarning": "75.0",
+        "templowwarning": "0.0",
+        "vcchighalarm": "3.45",
+        "vcclowalarm": "3.1",
+        "vcchighwarning": "3.4",
+        "vcclowwarning": "3.15",
+        "rxpowerhighalarm": "2.0",
+        "rxpowerlowalarm": "-21.024",
+        "rxpowerhighwarning": "0.0",
+        "rxpowerlowwarning": "-18.013",
+        "txpowerhighalarm": "-5.0",
+        "txpowerlowalarm": "-16.99",
+        "txpowerhighwarning": "-6.0",
+        "txpowerlowwarning": "-16.003",
+        "txbiashighalarm": "450.0",
+        "txbiaslowalarm": "100.0",
+        "txbiashighwarning": "420.0",
+        "txbiaslowwarning": "110.0",
+        "lasertemphighalarm": "80.0",
+        "lasertemplowalarm": "-5.0",
+        "lasertemphighwarning": "75.0",
+        "lasertemplowwarning": "0.0",
+        "prefecberhighalarm": "0.0125",
+        "prefecberlowalarm": "0.0",
+        "prefecberhighwarning": "0.011000000000000001",
+        "prefecberlowwarning": "0.0",
+        "postfecberhighalarm": "1000",
+        "postfecberlowalarm": "0.0",
+        "postfecberhighwarning": "1.0",
+        "postfecberlowwarning": "0.0",
+        "biasxihighalarm": "99.00053406576639",
+        "biasxilowalarm": "0.9994659342336156",
+        "biasxihighwarning": "94.99961852445259",
+        "biasxilowwarning": "5.000381475547417",
+        "biasxqhighalarm": "99.00053406576639",
+        "biasxqlowalarm": "0.9994659342336156",
+        "biasxqhighwarning": "94.99961852445259",
+        "biasxqlowwarning": "5.000381475547417",
+        "biasxphighalarm": "99.00053406576639",
+        "biasxplowalarm": "0.9994659342336156",
+        "biasxphighwarning": "94.99961852445259",
+        "biasxplowwarning": "5.000381475547417",
+        "biasyihighalarm": "99.00053406576639",
+        "biasyilowalarm": "0.9994659342336156",
+        "biasyihighwarning": "94.99961852445259",
+        "biasyilowwarning": "5.000381475547417",
+        "biasyqhighalarm": "99.00053406576639",
+        "biasyqlowalarm": "0.9994659342336156",
+        "biasyqhighwarning": "94.99961852445259",
+        "biasyqlowwarning": "5.000381475547417",
+        "biasyphighalarm": "99.00053406576639",
+        "biasyplowalarm": "0.9994659342336156",
+        "biasyphighwarning": "94.99961852445259",
+        "biasyplowwarning": "5.000381475547417",
+        "cdshorthighalarm": "1000",
+        "cdshortlowalarm": "-1000",
+        "cdshorthighwarning": "500",
+        "cdshortlowwarning": "-500",
+        "cdlonghighalarm": "400000",
+        "cdlonglowalarm": "-400000",
+        "cdlonghighwarning": "200000",
+        "cdlonglowwarning": "-200000",
+        "dgdhighalarm": "7.0",
+        "dgdlowalarm": "0.0",
+        "dgdhighwarning": "7.0",
+        "dgdlowwarning": "0.0",
+        "sopmdhighalarm": "655.35",
+        "sopmdlowalarm": "0.0",
+        "sopmdhighwarning": "655.35",
+        "sopmdlowwarning": "0.0",
+        "pdlhighalarm": "4.0",
+        "pdllowalarm": "0.0",
+        "pdlhighwarning": "4.0",
+        "pdllowwarning": "0.0",
+        "osnrhighalarm": "99.0",
+        "osnrlowalarm": "0.0",
+        "osnrhighwarning": "99.0",
+        "osnrlowwarning": "0.0",
+        "esnrhighalarm": "99.0",
+        "esnrlowalarm": "0.0",
+        "esnrhighwarning": "99.0",
+        "esnrlowwarning": "0.0",
+        "cfohighalarm": "3800",
+        "cfolowalarm": "-3800",
+        "cfohighwarning": "3800",
+        "cfolowwarning": "-3800",
+        "txcurrpowerhighalarm": "-5.0",
+        "txcurrpowerlowalarm": "-17.0",
+        "txcurrpowerhighwarning": "-6.0",
+        "txcurrpowerlowwarning": "-16.0",
+        "rxtotpowerhighalarm": "2.0",
+        "rxtotpowerlowalarm": "-21.0",
+        "rxtotpowerhighwarning": "0.0",
+        "rxtotpowerlowwarning": "-18.0",
+        "rxsigpowerhighalarm": "13.0",
+        "rxsigpowerlowalarm": "-18.0",
+        "rxsigpowerhighwarning": "10.0",
+        "rxsigpowerlowwarning": "-15.0"
+    },
+    "TRANSCEIVER_PM|Ethernet44":{
+        "prefec_ber_avg": "0.00046578129838019075",
+        "prefec_ber_min": "0.00045750117895600233",
+        "prefec_ber_max": "0.000575639239547097",
+        "uncorr_frames_avg": "0.0",
+        "uncorr_frames_min": "0.0",
+        "uncorr_frames_max": "0.0",
+        "cd_avg": "0",
+        "cd_min": "0",
+        "cd_max": "0",
+        "dgd_avg": "5.56",
+        "dgd_min": "5.37",
+        "dgd_max": "5.81",
+        "sopmd_avg": "0.0",
+        "sopmd_min": "0.0",
+        "sopmd_max": "0.0",
+        "pdl_avg": "0.6",
+        "pdl_min": "0.5",
+        "pdl_max": "0.6",
+        "osnr_avg": "36.5",
+        "osnr_min": "36.5",
+        "osnr_max": "36.5",
+        "esnr_avg": "30.5",
+        "esnr_min": "30.5",
+        "esnr_max": "30.5",
+        "cfo_avg": "70",
+        "cfo_min": "54",
+        "cfo_max": "121",
+        "evm_avg": "100.0",
+        "evm_min": "100.0",
+        "evm_max": "100.0",
+        "soproc_avg": "1",
+        "soproc_min": "1",
+        "soproc_max": "2",
+        "tx_power_avg": "-8.23",
+        "tx_power_min": "-8.22",
+        "tx_power_max": "-8.24",
+        "rx_tot_power_avg": "-10.62",
+        "rx_tot_power_min": "-10.61",
+        "rx_tot_power_max": "-10.62",
+        "rx_sig_power_avg": "0",
+        "rx_sig_power_min": "-40",
+        "rx_sig_power_max": "40"
+    },
     "TRANSCEIVER_STATUS|Ethernet0": {
         "status": "67",
         "error": "Blocking Error|High temperature"
@@ -233,6 +401,10 @@
         "status": "255",
         "error": "Unknown"
     },
+    "TRANSCEIVER_STATUS|Ethernet40": {
+        "status": "0",
+        "error": "N/A"
+    },
     "CHASSIS_INFO|chassis 1": {
         "psu_num": "2"
     },
@@ -249,6 +421,7 @@
         "voltage_max_threshold": "None",
         "current": "8.37",
         "power": "102.7",
+        "power_overload": "True",
         "is_replaceable": "False",
         "led_status": "green"
     },
@@ -265,6 +438,7 @@
         "voltage_max_threshold": "None",
         "current": "10.07",
         "power": "122.0",
+        "power_overload": "False",
         "is_replaceable": "False",
         "led_status": "green"
     },
@@ -364,6 +538,30 @@
         "Len": "4",
         "Name": "CRC-32",
         "Value": "0xAC518FB3"
+    },
+    "MUX_CABLE_INFO|Ethernet0": {
+        "version_peer_next": "0.2MS",
+        "version_peer_active": "0.2MS",
+        "version_peer_inactive": "0.2MS",
+        "version_nic_next": "0.2MS",
+        "version_nic_active": "0.2MS",
+        "version_nic_inactive": "0.2MS",
+        "version_self_next": "0.2MS",
+        "version_self_active": "0.2MS",
+        "version_self_inactive": "0.2MS",
+        "Value": "AABB"
+    },
+    "MUX_CABLE_INFO|Ethernet12": {
+        "version_peer_next": "0.1MS",
+        "version_peer_active": "0.1MS",
+        "version_peer_inactive": "0.1MS",
+        "version_nic_next": "0.1MS",
+        "version_nic_active": "0.1MS",
+        "version_nic_inactive": "0.1MS",
+        "version_self_next": "0.1MS",
+        "version_self_active": "0.1MS",
+        "version_self_inactive": "0.1MS",
+        "Value": "AABB"
     },
     "SWITCH_CAPABILITY|switch": {
         "MIRROR": "true",
@@ -878,5 +1076,84 @@
     },
     "SYSTEM_READY|SYSTEM_STATE": {
         "Status":"DOWN"
+    },
+    "VNET_ROUTE_TUNNEL_TABLE|test_v4_in_v4-0|160.162.191.1/32": {
+        "active_endpoints":"100.251.7.1",
+        "state":"active"
+    },
+    "VNET_ROUTE_TUNNEL_TABLE|test_v4_in_v4-0|160.163.191.1/32": {
+        "active_endpoints":"100.251.7.1",
+        "state":"active"
+    },
+    "VNET_ROUTE_TUNNEL_TABLE|Vnet_v6_in_v6-0|fddd:a156:a251::a6:1/128": {
+        "active_endpoints":"fddd:a100:a251::a10:1,fddd:a101:a251::a10:1",
+        "state":"active"
+    },
+    "BFD_SESSION_TABLE|default|default|100.251.7.1": {
+        "state":"Up",
+        "type": "async_active",
+        "local_addr" : "10.0.0.1",
+        "tx_interval" :"300",
+        "rx_interval" : "500",
+        "multiplier" : "3",
+        "multihop": "true"
+    },
+    "BFD_SESSION_TABLE|default|default|fddd:a101:a251::a10:1": {
+        "state":"Down",
+        "type": "async_active",
+        "local_addr" : "fddd:c101:a251::a10:2",
+        "tx_interval" :"300",
+        "rx_interval" : "500",
+        "multiplier" : "3",
+        "multihop": "true"
+    },
+    "ADVERTISE_NETWORK_TABLE|160.63.191.1/32": {
+        "profile": "FROM_SDN_SLB_ROUTES"
+    },
+    "ADVERTISE_NETWORK_TABLE|160.62.191.1/32": {
+        "profile": "FROM_SDN_SLB_ROUTES"
+    },
+    "ADVERTISE_NETWORK_TABLE|160.64.191.1/32": {
+        "profile": "FROM_SDN_SLB_ROUTES"
+    },
+    "ADVERTISE_NETWORK_TABLE|fddd:a150:a251::a6:1/128": {
+        "profile": "FROM_SDN_SLB_ROUTES"
+    },
+    "ADVERTISE_NETWORK_TABLE|fccc:a250:a251::a6:1/128": {
+        "profile": ""
+    },
+    "FABRIC_PORT_TABLE|PORT0" : {
+        "STATUS": "up",
+        "REMOTE_MOD": "0",
+        "REMOTE_PORT": "79"
+    },
+    "FABRIC_PORT_TABLE|PORT1" : {
+        "STATUS": "down"
+    },
+    "FABRIC_PORT_TABLE|PORT2" : {
+        "STATUS": "up",
+        "REMOTE_MOD": "0",
+        "REMOTE_PORT": "94"
+    },
+    "FABRIC_PORT_TABLE|PORT3" : {
+        "STATUS": "down"
+    },
+    "FABRIC_PORT_TABLE|PORT4" : {
+        "STATUS": "up",
+        "REMOTE_MOD": "0",
+        "REMOTE_PORT": "85"
+    },
+    "FABRIC_PORT_TABLE|PORT5" : {
+        "STATUS": "down"
+    },
+    "FABRIC_PORT_TABLE|PORT6" : {
+        "STATUS": "up",
+        "REMOTE_MOD": "0",
+        "REMOTE_PORT": "84"
+    },
+    "FABRIC_PORT_TABLE|PORT7" : {
+        "STATUS": "up",
+        "REMOTE_MOD": "0",
+        "REMOTE_PORT": "93"
     }
 }

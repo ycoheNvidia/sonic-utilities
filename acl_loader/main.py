@@ -4,6 +4,7 @@ import click
 import ipaddress
 import json
 import syslog
+import operator
 
 import openconfig_acl
 import tabulate
@@ -758,7 +759,7 @@ class AclLoader(object):
                 namespace_configdb.mod_entry(self.ACL_RULE, key, None)
 
         for key in existing_controlplane_rules:
-            if cmp(self.rules_info[key], self.rules_db_info[key]) != 0:
+            if not operator.eq(self.rules_info[key], self.rules_db_info[key]):
                 self.configdb.set_entry(self.ACL_RULE, key, self.rules_info[key])
                 # Program for per-asic namespace corresponding to front asic also if present.
                 # For control plane ACL it's not needed but to keep all db in sync program everywhere
@@ -841,8 +842,10 @@ class AclLoader(object):
                                          val.get("monitor_port", ""), val.get("src_port", ""), val.get("direction", "").lower()])
 
         print("ERSPAN Sessions")
+        erspan_data = natsorted(erspan_data)
         print(tabulate.tabulate(erspan_data, headers=erspan_header, tablefmt="simple", missingval=""))
         print("\nSPAN Sessions")
+        span_data = natsorted(span_data)
         print(tabulate.tabulate(span_data, headers=span_header, tablefmt="simple", missingval=""))
 
     def show_policer(self, policer_name):

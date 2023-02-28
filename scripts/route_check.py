@@ -281,7 +281,10 @@ def get_routes():
 
     valid_rt = []
     for k in keys:
-        if not is_vrf(k) and not is_local(k):
+        if (is_vrf(k)):
+            k = k.split(":", 1)[1]
+
+        if not is_local(k):
             valid_rt.append(add_prefix_ifnot(k.lower()))
 
     print_message(syslog.LOG_DEBUG, json.dumps({"ROUTE_TABLE": sorted(valid_rt)}, indent=4))
@@ -447,6 +450,88 @@ def filter_out_vnet_routes(routes):
     return updated_routes
 
 
+def is_dualtor(config_db):
+    device_metadata = config_db.get_table('DEVICE_METADATA')
+    subtype = device_metadata['localhost'].get('subtype', '')
+    return subtype.lower() == 'dualtor'
+
+
+def filter_out_standalone_tunnel_routes(routes):
+    config_db = swsscommon.ConfigDBConnector()
+    config_db.connect()
+
+    if not is_dualtor(config_db):
+        return routes
+
+    app_db = swsscommon.DBConnector('APPL_DB', 0)
+    neigh_table = swsscommon.Table(app_db, 'NEIGH_TABLE')
+    neigh_keys = neigh_table.getKeys()
+    standalone_tunnel_route_ips = []
+    updated_routes = []
+
+    for neigh in neigh_keys:
+        _, mac = neigh_table.hget(neigh, 'neigh')
+        if mac == '00:00:00:00:00:00':
+            # remove preceding 'VlanXXXX' to get just the neighbor IP
+            neigh_ip = ':'.join(neigh.split(':')[1:])
+            standalone_tunnel_route_ips.append(neigh_ip)
+
+    if not standalone_tunnel_route_ips:
+        return routes
+
+    for route in routes:
+        ip, subnet = route.split('/')
+        ip_version = ipaddress.ip_address(ip).version
+
+        # we want to keep the route if it is not a standalone tunnel route.
+        # if the route subnet contains more than one address, it is not a
+        # standalone tunnel route
+        if (ip not in standalone_tunnel_route_ips) or \
+           ((ip_version == 6 and subnet != '128') or (ip_version == 4 and subnet != '32')):
+            updated_routes.append(route)
+
+    return updated_routes
+
+
+def get_soc_ips(config_db):
+    mux_table = config_db.get_table('MUX_CABLE')
+    soc_ips = []
+    for _, mux_entry in mux_table.items():
+        if mux_entry.get("cable_type", "") == "active-active" and "soc_ipv4" in mux_entry:
+            soc_ips.append(mux_entry["soc_ipv4"])
+
+    return soc_ips
+
+
+def filter_out_soc_ip_routes(routes):
+    """
+    Ignore ASIC only routes for SOC IPs
+
+    For active-active cables, we want the tunnel route for SOC IPs
+    to only be programmed to the ASIC and not to the kernel. This is to allow
+    gRPC connections coming from ycabled to always use the direct link (since this
+    will use the kernel routing table), but still provide connectivity to any external
+    traffic in case of a link issue (since this traffic will be forwarded by the ASIC).
+    """
+    config_db = swsscommon.ConfigDBConnector()
+    config_db.connect()
+
+    if not is_dualtor(config_db):
+        return routes
+
+    soc_ips = get_soc_ips(config_db)
+
+    if not soc_ips:
+        return routes
+    
+    updated_routes = []
+    for route in routes:
+        if route not in soc_ips:
+            updated_routes.append(route)
+
+    return updated_routes
+
+
 def check_routes():
     """
     The heart of this script which runs the checks.
@@ -483,6 +568,8 @@ def check_routes():
     _, rt_asic_miss = diff_sorted_lists(intf_appl, rt_asic_miss)
     rt_asic_miss = filter_out_default_routes(rt_asic_miss)
     rt_asic_miss = filter_out_vnet_routes(rt_asic_miss)
+    rt_asic_miss = filter_out_standalone_tunnel_routes(rt_asic_miss)
+    rt_asic_miss = filter_out_soc_ip_routes(rt_asic_miss)
 
     # Check APPL-DB INTF_TABLE with ASIC table route entries
     intf_appl_miss, _ = diff_sorted_lists(intf_appl, rt_asic)

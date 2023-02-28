@@ -1,7 +1,7 @@
 import json
 import os
 from enum import Enum
-from .gu_common import GenericConfigUpdaterError, ConfigWrapper, \
+from .gu_common import GenericConfigUpdaterError, EmptyTableError, ConfigWrapper, \
                        DryRunConfigWrapper, PatchWrapper, genericUpdaterLogging
 from .patch_sorter import StrictPatchSorter, NonStrictPatchSorter, ConfigSplitter, \
                           TablesWithoutYangConfigSplitter, IgnorePathsFromYangConfigSplitter
@@ -47,6 +47,10 @@ class PatchApplier:
         # Generate target config
         self.logger.log_notice("Simulating the target full config after applying the patch.")
         target_config = self.patch_wrapper.simulate_patch(patch, old_config)
+        
+        # Validate all JsonPatch operations on specified fields
+        self.logger.log_notice("Validating all JsonPatch operations are permitted on the specified fields")
+        self.config_wrapper.validate_field_operation(old_config, target_config)
 
         # Validate target config does not have empty tables since they do not show up in ConfigDb
         self.logger.log_notice("Validating target config does not have empty tables, " \
@@ -54,7 +58,7 @@ class PatchApplier:
         empty_tables = self.config_wrapper.get_empty_tables(target_config)
         if empty_tables: # if there are empty tables
             empty_tables_txt = ", ".join(empty_tables)
-            raise ValueError("Given patch is not valid because it will result in empty tables " \
+            raise EmptyTableError("Given patch is not valid because it will result in empty tables " \
                              "which is not allowed in ConfigDb. " \
                             f"Table{'s' if len(empty_tables) != 1 else ''}: {empty_tables_txt}")
 

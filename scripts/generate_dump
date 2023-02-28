@@ -528,6 +528,40 @@ save_bgp_neighbor() {
 }
 
 ###############################################################################
+# Iterates all EVPN neighbors and runs save_vtysh to save each neighbor's
+# advertised-routes and received-routes
+# On multi ASIC platform, collects information from all namespaces
+# Globals:
+#  None
+# Arguments:
+#  Optional arg namespace
+# Returns:
+#  None
+###############################################################################
+save_bgp_evpn_neighbor() {
+    trap 'handle_error $? $LINENO' ERR
+    local timeout_cmd="timeout --foreground ${TIMEOUT_MIN}m"
+    local asic_id=${1:-""}
+    local ns=$(get_vtysh_namespace $asic_id)
+
+    evpn_neighbors=$(${timeout_cmd} bash -c "vtysh -c 'show bgp l2vpn evpn summary' | cut -d ' ' -f1")
+    local parse_neighbors=false
+    for word in $evpn_neighbors; do
+        if [[ $word == "Neighbor" ]]; then
+            parse_neighbors=true
+            continue
+        elif [[ $word == "Total" ]]; then
+            parse_neighbors=false
+            continue
+        fi
+        if [ "$parse_neighbors" = true ]; then
+            save_cmd "vtysh $ns -c \"show bgp l2vpn evpn neighbors $word advertised-routes\"" "bgp.evpn.neighbor.$word.adv$asic_id"
+            save_cmd "vtysh $ns -c \"show bgp l2vpn evpn neighbors $word routes\"" "bgp.evpn.neighbor.$word.rcv$asic_id"
+        fi
+    done
+}
+
+###############################################################################
 # Iterates all ASIC namespaces on multi ASIC platform and on default (host)
 # namespace on single ASIC platform
 # Globals:
@@ -545,6 +579,28 @@ save_bgp_neighbor_all_ns() {
         for (( i=0; i<$NUM_ASICS; i++ ))
         do
             save_bgp_neighbor $i
+        done
+    fi
+}
+
+###############################################################################
+# Iterates all ASIC namespaces on multi ASIC platform and on default (host)
+# namespace on single ASIC platform
+# Globals:
+#  NUM_ASICS
+# Arguments:
+#  None
+# Returns:
+#  None
+###############################################################################
+save_bgp_evpn_neighbor_all_ns() {
+    trap 'handle_error $? $LINENO' ERR
+    if [[ ( "$NUM_ASICS" == 1 ) ]] ; then
+        save_bgp_evpn_neighbor
+    else
+        for (( i=0; i<$NUM_ASICS; i++ ))
+        do
+            save_bgp_evpn_neighbor $i
         done
     fi
 }
@@ -602,6 +658,7 @@ save_ip_info() {
     save_ip "route show table all" "route"
     save_ip "neigh" "neigh"
     save_ip "-s neigh show nud noarp" "neigh.noarp"
+    save_ip "-s link" "link.stats"
 }
 
 ###############################################################################
@@ -624,6 +681,23 @@ save_bgp_info() {
     save_bgp_neighbor_all_ns
 }
 
+###############################################################################
+# Save EVPN related info
+# Globals:
+#  None
+# Arguments:
+#  None
+# Returns:
+#  None
+###############################################################################
+save_evpn_info() {
+    trap 'handle_error $? $LINENO' ERR
+    save_vtysh "show bgp l2vpn evpn" "bgp.l2vpn.evpn"
+    save_vtysh "show bgp l2vpn evpn route detail" "bgp.evpn.route"
+    save_vtysh "show evpn vni detail" "bgp.evpn.vni"
+    save_vtysh "show evpn arp-cache vni all" "bgp.evpn.arp"
+    save_bgp_evpn_neighbor_all_ns
+}
 ###############################################################################
 # Save FRR related info
 # Globals:
@@ -662,6 +736,7 @@ save_redis_info() {
     save_redis "CONFIG_DB" "CONFIG_DB" remove_secret_from_config_db_dump
     save_redis "FLEX_COUNTER_DB"
     save_redis "STATE_DB"
+    save_redis "APPL_STATE_DB"
 }
 
 ###############################################################################
@@ -698,6 +773,59 @@ save_proc() {
     done
     $TAR $V -rhf $TARFILE -C $DUMPDIR --mode=+rw $BASE/proc
     $RM $V -rf $TARDIR/proc
+}
+
+###############################################################################
+# Dump io stats for processes
+# Globals:
+#  V
+#  TARDIR
+#  MKDIR
+#  CP
+#  DUMPDIR
+#  TAR
+#  RM
+#  BASE
+#  TARFILE
+#  NOOP
+# Arguments:
+#  None
+# Returns:
+#  None
+###############################################################################
+save_proc_stats() {
+    trap 'handle_error $? $LINENO' ERR
+    $MKDIR $V -p $TARDIR/proc_stats
+
+    local stats_file=/tmp/stats
+    echo > $stats_file
+    for pid in /proc/[[:digit:]]*
+    do
+        pid_num=${pid//[!0-9]/}
+        cmdline=`eval ps -p $pid_num -o args --no-headers`
+        if test -n "$cmdline"; then
+            echo pid $pid
+            echo cmdline: $cmdline
+            cat $pid/io; echo
+        else
+            #Dump also internal kernel processes if they perform writes
+            write_bytes=$(cat $pid/io | grep -w write_bytes: | cut -b 14-)
+            if [ "$write_bytes" != "0" ]; then
+                echo pid $pid - `cat $pid/comm`:
+                cat $pid/io; echo
+            fi
+        fi
+    done >> $stats_file 2>&1
+
+    if $NOOP; then
+        echo "$CP $V -r $stats_file $TARDIR/proc_stats"
+    else
+        ( $CP $V -r $stats_file $TARDIR/proc_stats ) || echo "$stats_file error" > $TARDIR/$stats_file
+    fi
+
+    $TAR $V -rhf $TARFILE -C $DUMPDIR --mode=+rw $BASE/proc_stats
+    $RM $V -rf $TARDIR/proc_stats
+    $RM -rf $stats_file
 }
 
 ###############################################################################
@@ -757,7 +885,7 @@ save_platform_info() {
     if [[ ! $PLATFORM =~ .*(mlnx|nvidia).*simx.* ]]; then
         save_cmd "show platform syseeprom" "syseeprom"
         save_cmd "show platform psustatus" "psustatus"
-        save_cmd "show platform ssdhealth" "ssdhealth"
+        save_cmd "show platform ssdhealth --vendor" "ssdhealth"
         save_cmd "show platform temperature" "temperature"
         save_cmd "show platform fan" "fan"
     fi
@@ -866,6 +994,49 @@ enable_logrotate() {
     sed -i '/\/usr\/sbin\/logrotate/s/^#*//g' /etc/cron.d/logrotate
 }
 
+###############################################################################
+# Create a relative symbolic link of an existing file
+# Globals:
+#  BASE
+#  MKDIR
+#  TAR
+#  TARFILE
+#  DUMPDIR
+#  V
+#  RM
+#  NOOP
+# Arguments:
+#  filename: the full path of the file
+#  dest_dir: destination dir where the link is created
+#  src_sir: directory under $TARDIR where the actual file exists
+# Returns:
+#  None
+###############################################################################
+save_symlink() {
+    trap 'handle_error $? $LINENO' ERR
+    local start_t=$(date +%s%3N)
+    local end_t=0
+    local filename=$1
+    local dest_dir=$2
+    local src_dir=$3
+    local do_tar_append=${4:-true}
+    local file_basename=$(basename $filename)
+    local tar_path="$BASE/$dest_dir/$file_basename"
+
+    $MKDIR $V -p "$TARDIR/$dest_dir"
+
+    ${CMD_PREFIX}pushd $TARDIR/$dest_dir
+    ${CMD_PREFIX}ln -s ../$src_dir/$file_basename $file_basename
+    ${CMD_PREFIX}popd
+
+    if $do_tar_append; then
+        ($TAR $V -rf $TARFILE -C $DUMPDIR "$tar_path" \
+            || abort "${EXT_PROCFS_SAVE_FAILED}" "tar append operation failed. Aborting to prevent data loss.") \
+            && $RM $V -f "$DUMPDIR/$tar_path"
+    fi
+    end_t=$(date +%s%3N)
+    echo "[ save_symlink:$filename] : $(($end_t-$start_t)) msec"  >> $TECHSUPPORT_TIME_INFO
+}
 
 ###############################################################################
 # Collect Mellanox specific information
@@ -885,6 +1056,10 @@ collect_mellanox() {
     ${CMD_PREFIX}docker exec syncd mkdir -p $sai_dump_folder
     ${CMD_PREFIX}docker exec syncd saisdkdump -f $sai_dump_filename
 
+    if [ $? != 0 ]; then
+        echo "Failed to collect saisdkdump."
+    fi
+
     copy_from_docker syncd $sai_dump_folder $sai_dump_folder
     echo "$sai_dump_folder"
     for file in `ls $sai_dump_folder`; do
@@ -893,16 +1068,6 @@ collect_mellanox() {
 
     ${CMD_PREFIX}rm -rf $sai_dump_folder
     ${CMD_PREFIX}docker exec syncd rm -rf $sai_dump_folder
-
-    # Save SDK error dumps
-    local sdk_dump_path=`${CMD_PREFIX}docker exec syncd cat /tmp/sai.profile|grep "SAI_DUMP_STORE_PATH"|cut -d = -f2`
-    if [[ -d $sdk_dump_path ]]; then
-        copy_from_docker syncd $sdk_dump_path  /tmp/sdk-dumps
-        for file in $(find /tmp/sdk-dumps -type f); do
-            save_file ${file} sai_sdk_dump false
-        done
-        rm -rf /tmp/sdk-dumps
-    fi
 
     # run 'hw-management-generate-dump.sh' script and save the result file
     HW_DUMP_FILE=/usr/bin/hw-management-generate-dump.sh
@@ -923,6 +1088,53 @@ collect_mellanox() {
       echo "HW Mgmt dump script $HW_DUMP_FILE does not exist"
     fi
 
+}
+
+###############################################################################
+# Collect dfw dumps if any. Applies to only MLNX platform
+# Globals:
+#  CMD_PREFIX
+# Arguments:
+#  None
+# Returns:
+#  None
+###############################################################################
+collect_mellanox_dfw_dumps() {
+    trap 'handle_error $? $LINENO' ERR
+    local platform=$(python3 -c "from sonic_py_common import device_info; print(device_info.get_platform())")
+    local hwsku=$(python3 -c "from sonic_py_common import device_info; print(device_info.get_hwsku())")
+    local sdk_dump_path=`cat /usr/share/sonic/device/${platform}/${hwsku}/sai.profile|grep "SAI_DUMP_STORE_PATH"|cut -d = -f2`
+
+    if [[ ! -d $sdk_dump_path ]]; then
+       # This would mean the SAI_DUMP_STORE_PATH is not mounted on the host and is only accessible though the container 
+       # This is a bad design and not recommended But there is nothing which restricts against it and thus the special handling
+       if [[ "$( docker container inspect -f '{{.State.Running}}' syncd )" == "true" ]]; then
+            $RM $V -rf /tmp/dfw-sdk-dumps
+            $MKDIR $V -p /tmp/dfw-sdk-dumps
+            copy_from_docker syncd $sdk_dump_path /tmp/dfw-sdk-dumps
+       else
+            echo "ERROR: dfw dumps cannot be collected"
+       fi
+       sdk_dump_path="/tmp/dfw-sdk-dumps"
+    fi
+
+    for file in $(find_files "$sdk_dump_path"); do
+        if $TAR -tf $TARFILE | grep $BASE/log/$(basename $file); then
+            # If this path sits under "/var/log/" dir, the files
+            # would've already been collected and thus just add a sym link
+            if [ ! -z "${file##*.gz}" ]; then
+                # files saved under log/ are zipped with gz
+                file=$file.gz
+            fi
+            ${CMD_PREFIX}save_symlink ${file} sai_sdk_dump log
+        else
+            if [ ! -z "${file##*.gz}" ]; then
+                ${CMD_PREFIX}save_file ${file} sai_sdk_dump true
+            else
+                ${CMD_PREFIX}save_file ${file} sai_sdk_dump false
+            fi
+        fi
+    done
 }
 
 ###############################################################################
@@ -1082,6 +1294,34 @@ collect_barefoot() {
         save_file "${file}" log true true
     done
 } 
+
+###############################################################################
+# Collect Cisco-8000 specific information
+# Globals:
+#  None
+# Arguments:
+#  None
+# Returns:
+#  None
+###############################################################################
+collect_cisco_8000() {
+    trap 'handle_error $? $LINENO' ERR
+    local platform=$(show platform summary --json | python -c 'import sys, json; \
+        print(json.load(sys.stdin)["platform"])')
+
+    if [ -d /usr/share/sonic/device/${platform} ]; then
+        pushd /usr/share/sonic/device/${platform} > /dev/null
+        for file in $(find . -path "./*plugin*" -prune -o -path "./*.xml" -prune -o -path "./*.yaml" -prune -o -print); do
+            if [ -f ${file} ]; then
+                 save_file ${file} sai false
+            fi
+        done
+        popd > /dev/null
+    else
+        echo "'/usr/share/sonic/device/${platform}' does not exist" > /tmp/error
+        save_file /tmp/error sai false
+    fi
+}
 
 ###############################################################################
 # Save log file
@@ -1309,6 +1549,7 @@ main() {
         /proc/uptime /proc/version /proc/vmallocinfo /proc/vmstat \
         /proc/zoneinfo \
         || abort "${EXT_PROCFS_SAVE_FAILED}" "Proc saving operation failed. Aborting for safety."
+    save_proc_stats
     end_t=$(date +%s%3N)
     echo "[ Capture Proc State ] : $(($end_t-$start_t)) msec" >> $TECHSUPPORT_TIME_INFO
 
@@ -1319,6 +1560,7 @@ main() {
     save_cmd "show reboot-cause" reboot.cause
 
     local asic="$(/usr/local/bin/sonic-cfggen -y /etc/sonic/sonic_version.yml -v asic_type)"
+    local device_type=`sonic-db-cli CONFIG_DB hget 'DEVICE_METADATA|localhost' type`
     # 1st counter snapshot early. Need 2 snapshots to make sense of counters trend.
     save_counter_snapshot $asic 1
 
@@ -1332,6 +1574,7 @@ main() {
     save_cmd "show version" "version"
     save_cmd "show platform summary" "platform.summary"
     save_cmd "cat /host/machine.conf" "machine.conf"
+    save_cmd "cat /boot/config-$(uname -r)" "boot.conf"
     save_cmd "docker stats --no-stream" "docker.stats"
 
     save_cmd "sensors" "sensors"
@@ -1344,6 +1587,7 @@ main() {
 
     save_frr_info
     save_bgp_info
+    save_evpn_info
 
     save_cmd "show interface status -d all" "interface.status"
     save_cmd "show interface transceiver presence" "interface.xcvrs.presence"
@@ -1394,7 +1638,15 @@ main() {
         done
     fi
 
-    save_saidump
+    save_cmd "dpkg -l" "dpkg"
+    save_cmd "who -a" "who"
+    save_cmd "swapon -s" "swapon"
+    save_cmd "hdparm -i /dev/sda" "hdparm"
+    save_cmd "ps -AwwL -o user,pid,lwp,ppid,nlwp,pcpu,pri,nice,vsize,rss,tty,stat,wchan:12,start,bsdtime,command" "ps.extended"
+
+    if [[ "$device_type" != "SpineRouter" ]]; then
+        save_saidump
+    fi
 
     if [ "$asic" = "barefoot" ]; then
         collect_barefoot
@@ -1408,6 +1660,10 @@ main() {
         collect_broadcom
     fi
 
+    if [ "$asic" = "cisco-8000" ]; then
+        collect_cisco_8000
+    fi
+
     # 2nd counter snapshot late. Need 2 snapshots to make sense of counters trend.
     save_counter_snapshot $asic 2
 
@@ -1419,7 +1675,7 @@ main() {
     rm_list=$(find -L $TARDIR/etc -maxdepth 5 -type l)
     if [ ! -z "$rm_list" ]
     then
-        rm $rm_list
+        rm -f $rm_list
     fi
 
     # Remove secret from /etc files before tar
@@ -1453,6 +1709,10 @@ main() {
     save_log_files
     save_crash_files
     save_warmboot_files
+
+    if [[ "$asic" = "mellanox" ]]; then
+        collect_mellanox_dfw_dumps
+    fi
 
     finalize
 }

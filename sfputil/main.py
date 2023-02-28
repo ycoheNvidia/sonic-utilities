@@ -20,6 +20,8 @@ from sonic_platform_base.sfp_base import SfpBase
 from swsscommon.swsscommon import SonicV2Connector
 from natsort import natsorted
 from sonic_py_common import device_info, logger, multi_asic
+from utilities_common.sfp_helper import covert_application_advertisement_to_output_string
+from utilities_common.sfp_helper import QSFP_DATA_MAP
 from tabulate import tabulate
 
 VERSION = '3.0'
@@ -44,26 +46,12 @@ CDB_DEFAULT_HOST_PASSWORD = 0x00001011
 
 MAX_LPL_FIRMWARE_BLOCK_SIZE = 116 #Bytes
 
-# TODO: We should share these maps and the formatting functions between sfputil and sfpshow
-QSFP_DATA_MAP = {
-    'model': 'Vendor PN',
-    'vendor_oui': 'Vendor OUI',
-    'vendor_date': 'Vendor Date Code(YYYY-MM-DD Lot)',
-    'manufacturer': 'Vendor Name',
-    'vendor_rev': 'Vendor Rev',
-    'serial': 'Vendor SN',
-    'type': 'Identifier',
-    'ext_identifier': 'Extended Identifier',
-    'ext_rateselect_compliance': 'Extended RateSelect Compliance',
-    'cable_length': 'cable_length',
-    'cable_type': 'Length',
-    'nominal_bit_rate': 'Nominal Bit Rate(100Mbs)',
-    'specification_compliance': 'Specification compliance',
-    'encoding': 'Encoding',
-    'connector': 'Connector',
-    'application_advertisement': 'Application Advertisement'
-}
+PAGE_SIZE = 128
+PAGE_OFFSET = 128
 
+SFF8472_A0_SIZE = 256
+
+# TODO: We should share these maps and the formatting functions between sfputil and sfpshow
 QSFP_DD_DATA_MAP = {
     'model': 'Vendor PN',
     'vendor_oui': 'Vendor OUI',
@@ -345,6 +333,8 @@ def convert_sfp_info_to_output_string(sfp_info_dict):
             elif key == 'supported_max_laser_freq' or key == 'supported_min_laser_freq':
                 if key in sfp_info_dict:  # C-CMIS compliant / coherent modules
                     output += '{}{}: {}GHz\n'.format(indent, QSFP_DD_DATA_MAP[key], sfp_info_dict[key])
+            elif key == 'application_advertisement':
+                output += covert_application_advertisement_to_output_string(indent, sfp_info_dict)
             else:
                 try:
                     output += '{}{}: {}\n'.format(indent, QSFP_DD_DATA_MAP[key], sfp_info_dict[key])
@@ -688,6 +678,148 @@ def eeprom(port, dump_dom, namespace):
 
     click.echo(output)
 
+# 'eeprom-hexdump' subcommand
+@show.command()
+@click.option('-p', '--port', metavar='<port_name>', required=True, help="Display SFP EEPROM hexdump for port <port_name>")
+@click.option('-n', '--page', metavar='<page_number>', help="Display SFP EEEPROM hexdump for <page_number_in_hex>")
+def eeprom_hexdump(port, page):
+    """Display EEPROM hexdump of SFP transceiver(s) for a given port name and page number"""
+    output = ""
+
+    if platform_sfputil.is_logical_port(port) == 0:
+        click.echo("Error: invalid port {}".format(port))
+        print_all_valid_port_values()
+        sys.exit(ERROR_INVALID_PORT)
+
+    if page is None:
+        page = '0'
+
+    logical_port_name = port
+    physical_port = logical_port_to_physical_port_index(logical_port_name)
+
+    if is_port_type_rj45(logical_port_name):
+        click.echo("{}: SFP EEPROM Hexdump is not applicable for RJ45 port".format(port))
+        sys.exit(ERROR_INVALID_PORT)
+
+    try:
+        presence = platform_chassis.get_sfp(physical_port).get_presence()
+    except NotImplementedError:
+        click.echo("Sfp.get_presence() is currently not implemented for this platform")
+        sys.exit(ERROR_NOT_IMPLEMENTED)
+
+    if not presence:
+        click.echo("SFP EEPROM not detected")
+        sys.exit(ERROR_NOT_IMPLEMENTED)
+    else:
+        try:
+            id = platform_chassis.get_sfp(physical_port).read_eeprom(0, 1)
+            if id is None:
+                click.echo("Error: Failed to read EEPROM for offset 0!")
+                sys.exit(ERROR_NOT_IMPLEMENTED)
+        except NotImplementedError:
+            click.echo("Sfp.read_eeprom() is currently not implemented for this platform")
+            sys.exit(ERROR_NOT_IMPLEMENTED)
+
+        if id[0] == 0x3:
+            output = eeprom_hexdump_sff8472(port, physical_port, page)
+        else:
+            output = eeprom_hexdump_sff8636(port, physical_port, page)
+
+    output += '\n'
+
+    click.echo(output)
+
+def eeprom_hexdump_sff8472(port, physical_port, page):
+    try:
+        output = ""
+        indent = ' ' * 8
+        output += 'EEPROM hexdump for port {} page {}h'.format(port, page)
+        output += '\n{}A0h dump'.format(indent)
+        page_dump = platform_chassis.get_sfp(physical_port).read_eeprom(0, SFF8472_A0_SIZE)
+        if page_dump is None:
+            click.echo("Error: Failed to read EEPROM for A0h!")
+            sys.exit(ERROR_NOT_IMPLEMENTED)
+
+        output += hexdump(indent, page_dump, 0)
+        page_dump = platform_chassis.get_sfp(physical_port).read_eeprom(SFF8472_A0_SIZE, PAGE_SIZE)
+        if page_dump is None:
+            click.echo("Error: Failed to read EEPROM for A2h!")
+            sys.exit(ERROR_NOT_IMPLEMENTED)
+        else:
+            output += '\n\n{}A2h dump (lower 128 bytes)'.format(indent)
+            output += hexdump(indent, page_dump, 0)
+
+        page_dump = platform_chassis.get_sfp(physical_port).read_eeprom(SFF8472_A0_SIZE + PAGE_OFFSET + (int(page, base=16) * PAGE_SIZE), PAGE_SIZE)
+        if page_dump is None:
+            click.echo("Error: Failed to read EEPROM for A2h upper page!")
+            sys.exit(ERROR_NOT_IMPLEMENTED)
+        else:
+            output += '\n\n{}A2h dump (upper 128 bytes) page {}h'.format(indent, page)
+            output += hexdump(indent, page_dump, PAGE_OFFSET)
+    except NotImplementedError:
+        click.echo("Sfp.read_eeprom() is currently not implemented for this platform")
+        sys.exit(ERROR_NOT_IMPLEMENTED)
+    except ValueError:
+        click.echo("Please enter a numeric page number")
+        sys.exit(ERROR_NOT_IMPLEMENTED)
+
+    return output
+
+def eeprom_hexdump_sff8636(port, physical_port, page):
+    try:
+        output = ""
+        indent = ' ' * 8
+        output += 'EEPROM hexdump for port {} page {}h'.format(port, page)
+        output += '\n{}Lower page 0h'.format(indent)
+        page_dump = platform_chassis.get_sfp(physical_port).read_eeprom(0, PAGE_SIZE)
+        if page_dump is None:
+            click.echo("Error: Failed to read EEPROM for page 0!")
+            sys.exit(ERROR_NOT_IMPLEMENTED)
+
+        output += hexdump(indent, page_dump, 0)
+        page_dump = platform_chassis.get_sfp(physical_port).read_eeprom(int(page, base=16) * PAGE_SIZE + PAGE_OFFSET, PAGE_SIZE)
+        if page_dump is None:
+            click.echo("Error: Failed to read EEPROM!")
+            sys.exit(ERROR_NOT_IMPLEMENTED)
+        else:
+            output += '\n\n{}Upper page {}h'.format(indent, page)
+            output += hexdump(indent, page_dump, PAGE_OFFSET)
+    except NotImplementedError:
+        click.echo("Sfp.read_eeprom() is currently not implemented for this platform")
+        sys.exit(ERROR_NOT_IMPLEMENTED)
+    except ValueError:
+        click.echo("Please enter a numeric page number")
+        sys.exit(ERROR_NOT_IMPLEMENTED)
+
+    return output
+
+def convert_byte_to_valid_ascii_char(byte):
+    if byte < 32 or 126 < byte:
+        return '.'
+    else:
+        return chr(byte)
+
+def hexdump(indent, data, mem_address):
+    ascii_string = ''
+    result = ''
+    for byte in data:
+        ascii_string = ascii_string + convert_byte_to_valid_ascii_char(byte)
+        byte_string = "{:02x}".format(byte)
+        if mem_address % 16 == 0:
+            mem_address_string = "{:08x}".format(mem_address)
+            result += '\n{}{} '.format(indent, mem_address_string)
+            result += '{} '.format(byte_string)
+        elif mem_address % 16 == 15:
+            result += '{} '.format(byte_string)
+            result += '|{}|'.format(ascii_string)
+            ascii_string = ""
+        elif mem_address % 16 == 7:
+            result += ' {} '.format(byte_string)
+        else:
+            result += '{} '.format(byte_string)
+        mem_address += 1
+
+    return result
 
 # 'presence' subcommand
 @show.command()
@@ -862,15 +994,15 @@ def error_status(port, fetch_from_hardware):
     if fetch_from_hardware:
         output_table = fetch_error_status_from_platform_api(port)
     else:
-        # Connect to STATE_DB
-        state_db = SonicV2Connector(host='127.0.0.1')
-        if state_db is not None:
-            state_db.connect(state_db.STATE_DB)
-        else:
-            click.echo("Failed to connect to STATE_DB")
-            return
-
-        output_table = fetch_error_status_from_state_db(port, state_db)
+        namespaces = multi_asic.get_front_end_namespaces()
+        for namespace in namespaces:
+            state_db = SonicV2Connector(use_unix_socket_path=False, namespace=namespace)
+            if state_db is not None:
+                state_db.connect(state_db.STATE_DB)
+                output_table.extend(fetch_error_status_from_state_db(port, state_db))
+            else:
+                click.echo("Failed to connect to STATE_DB")
+                return
 
     click.echo(tabulate(output_table, table_header, tablefmt='simple'))
 
@@ -1112,6 +1244,59 @@ def run_firmware(port_name, mode):
 
     return status
 
+def is_fw_switch_done(port_name):
+    """
+        Make sure the run_firmware cmd is done
+        @port_name:
+        Returns 1 on success, and exit_code = -1 on failure
+    """
+    status = 0
+    physical_port = logical_port_to_physical_port_index(port_name)
+    sfp = platform_chassis.get_sfp(physical_port)
+
+    try:
+        api = sfp.get_xcvr_api()
+    except NotImplementedError:
+        click.echo("This functionality is currently not implemented for this platform")
+        sys.exit(ERROR_NOT_IMPLEMENTED)
+
+    try:
+        MAX_WAIT = 60 # 60s timeout.
+        is_busy = 1 # Initial to 1 for entering while loop at least one time.
+        timeout_time = time.time() + MAX_WAIT
+        while is_busy and (time.time() < timeout_time):
+            fw_info = api.get_module_fw_info()
+            is_busy = 1 if (fw_info['status'] == False) and (fw_info['result'] is not None) else 0
+            time.sleep(2)
+
+        if fw_info['status'] == True:
+            (ImageA, ImageARunning, ImageACommitted, ImageAInvalid,
+             ImageB, ImageBRunning, ImageBCommitted, ImageBInvalid) = fw_info['result']
+
+            if (ImageARunning == 1) and (ImageAInvalid == 1):       # ImageA is running, but also invalid.
+                click.echo("FW info error : ImageA shows running, but also shows invalid!")
+                status = -1 # Abnormal status.
+            elif (ImageBRunning == 1) and (ImageBInvalid == 1):     # ImageB is running, but also invalid.
+                click.echo("FW info error : ImageB shows running, but also shows invalid!")
+                status = -1 # Abnormal status.
+            elif (ImageARunning == 1) and (ImageACommitted == 0):   # ImageA is running, but not committed.
+                click.echo("FW images switch successful : ImageA is running")
+                status = 1  # run_firmware is done. 
+            elif (ImageBRunning == 1) and (ImageBCommitted == 0):   # ImageB is running, but not committed.
+                click.echo("FW images switch successful : ImageB is running")
+                status = 1  # run_firmware is done. 
+            else:                                                   # No image is running, or running and committed image is same.
+                click.echo("FW info error : Failed to switch into uncommitted image!")
+                status = -1 # Failure for Switching images.
+        else:
+            click.echo("FW switch : Timeout!")
+            status = -1     # Timeout or check code error or CDB not supported.
+
+    except NotImplementedError:
+        click.echo("This functionality is not applicable for this transceiver")
+
+    return status
+
 def commit_firmware(port_name):
     status = 0
     physical_port = logical_port_to_physical_port_index(port_name)
@@ -1211,8 +1396,8 @@ def download_firmware(port_name, filepath):
 def run(port_name, mode):
     """Run the firmware with default mode=1"""
 
-    if is_port_type_rj45(port_name): 
-        click.echo("This functionality is not applicable for RJ45 port {}.".format(port_name)) 
+    if is_port_type_rj45(port_name):
+        click.echo("This functionality is not applicable for RJ45 port {}.".format(port_name))
         sys.exit(EXIT_FAIL)
 
     if not is_sfp_present(port_name):
@@ -1232,8 +1417,8 @@ def run(port_name, mode):
 def commit(port_name):
     """Commit the running firmware"""
 
-    if is_port_type_rj45(port_name): 
-        click.echo("This functionality is not applicable for RJ45 port {}.".format(port_name)) 
+    if is_port_type_rj45(port_name):
+        click.echo("This functionality is not applicable for RJ45 port {}.".format(port_name))
         sys.exit(EXIT_FAIL)
 
     if not is_sfp_present(port_name):
@@ -1256,8 +1441,8 @@ def upgrade(port_name, filepath):
 
     physical_port = logical_port_to_physical_port_index(port_name)
 
-    if is_port_type_rj45(port_name): 
-        click.echo("This functionality is not applicable for RJ45 port {}.".format(port_name)) 
+    if is_port_type_rj45(port_name):
+        click.echo("This functionality is not applicable for RJ45 port {}.".format(port_name))
         sys.exit(EXIT_FAIL)
 
     if not is_sfp_present(port_name):
@@ -1280,6 +1465,10 @@ def upgrade(port_name, filepath):
 
     click.echo("Firmware run in mode 1 successful")
 
+    if is_fw_switch_done(port_name) != 1:
+        click.echo('Failed to switch firmware images!')
+        sys.exit(EXIT_FAIL)
+
     status = commit_firmware(port_name)
     if status != 1:
         click.echo('Failed to commit firmware! CDB status: {}'.format(status))
@@ -1294,8 +1483,8 @@ def upgrade(port_name, filepath):
 def download(port_name, filepath):
     """Download firmware on the transceiver"""
 
-    if is_port_type_rj45(port_name): 
-        click.echo("This functionality is not applicable for RJ45 port {}.".format(port_name)) 
+    if is_port_type_rj45(port_name):
+        click.echo("This functionality is not applicable for RJ45 port {}.".format(port_name))
         sys.exit(EXIT_FAIL)
 
     if not is_sfp_present(port_name):
@@ -1322,8 +1511,8 @@ def unlock(port_name, password):
     physical_port = logical_port_to_physical_port_index(port_name)
     sfp = platform_chassis.get_sfp(physical_port)
 
-    if is_port_type_rj45(port_name): 
-        click.echo("This functionality is not applicable for RJ45 port {}.".format(port_name)) 
+    if is_port_type_rj45(port_name):
+        click.echo("This functionality is not applicable for RJ45 port {}.".format(port_name))
         sys.exit(EXIT_FAIL)
 
     if not is_sfp_present(port_name):

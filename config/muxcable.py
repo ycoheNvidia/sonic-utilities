@@ -280,7 +280,7 @@ def update_configdb_pck_loss_data(config_db, port, val):
 
 # 'muxcable' command ("config muxcable mode <port|all> active|auto")
 @muxcable.command()
-@click.argument('state', metavar='<operation_status>', required=True, type=click.Choice(["active", "auto", "manual", "standby"]))
+@click.argument('state', metavar='<operation_status>', required=True, type=click.Choice(["active", "auto", "manual", "standby", "detach"]))
 @click.argument('port', metavar='<port_name>', required=True, default=None)
 @click.option('--json', 'json_output', required=False, is_flag=True, type=click.BOOL)
 @clicommon.pass_db
@@ -368,6 +368,22 @@ def mode(db, state, port, json_output):
                 click.echo(tabulate(data, headers=headers))
 
         sys.exit(CONFIG_SUCCESSFUL)
+
+
+# 'muxcable' command ("config muxcable kill-radv <enable|disable> ")
+@muxcable.command(short_help="Kill radv service when it is meant to be stopped, so no good-bye packet is sent for ceasing To Be an Advertising Interface")
+@click.argument('knob', metavar='<feature_knob>', required=True, type=click.Choice(["enable", "disable"]))
+@clicommon.pass_db
+def kill_radv(db, knob):
+    """config muxcable kill radv"""
+
+    namespaces = multi_asic.get_front_end_namespaces()
+    for namespace in namespaces:
+        config_db = ConfigDBConnector(use_unix_socket_path=True, namespace=namespace)
+        config_db.connect()
+
+        mux_lmgrd_cfg_tbl = config_db.get_table("MUX_LINKMGR")
+        config_db.mod_entry("MUX_LINKMGR", "SERVICE_MGMT", {"kill_radv": "True" if knob == "enable" else "False"})
 
 
  #'muxcable' command ("config muxcable packetloss reset <port|all>")

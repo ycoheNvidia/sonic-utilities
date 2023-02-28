@@ -188,9 +188,35 @@
         "admin_status": "up",
         "vlan": "10"
     },
-    "INTF_TABLE:Eth32.10": {
+    "INTF_TABLE:Eth36.10": {
         "admin_status": "up",
+        "vrf_name": "Vrf1",
         "vlan": "100"
+    },
+    "INTF_TABLE:Po0001.10": {
+        "admin_status": "up",
+        "vrf_name": "Vrf1",
+        "vlan": "100"
+    },
+    "INTF_TABLE:Ethernet0.10|10.11.12.13/24": {
+        "family": "IPv4",
+        "scope": "global"
+    },
+    "INTF_TABLE:Eth36.10|32.10.11.12/24": {
+        "family": "IPv4",
+        "scope": "global"
+    },
+    "INTF_TABLE:Po0001.10|10.10.11.12/24": {
+        "family": "IPv4",
+        "scope": "global"
+    },
+    "INTF_TABLE:Eth36.10|3210::12/126": {
+        "family": "IPv6",
+        "scope": "global"
+    },
+    "INTF_TABLE:Po0001.10|1010::12/126": {
+        "family": "IPv6",
+        "scope": "global"
     },
     "_GEARBOX_TABLE:phy:1": {
         "name": "sesto-1",
@@ -264,6 +290,16 @@
     "VXLAN_REMOTE_VNI_TABLE:Vlan200:25.25.25.27": {
         "vni": "200"
     },
+    "VXLAN_FDB_TABLE:Vlan200:00:02:00:00:47:e2": {
+        "remote_vtep": "2.2.2.2",
+        "type": "dynamic",
+        "vni": "200"
+    },
+    "VXLAN_FDB_TABLE:Vlan200:00:02:00:00:47:e3": {
+        "remote_vtep": "2.2.2.3",
+        "type": "dynamic",
+        "vni": "200"
+    },
     "MUX_CABLE_TABLE:Ethernet32": {
         "state": "active"
     },
@@ -287,5 +323,24 @@
     },
     "TUNNEL_ROUTE_TABLE:10.3.1.1": {
         "alias": "Vlan1000"
+    },
+    "VNET_ROUTE_TUNNEL_TABLE:test_v4_in_v4-0:160.163.191.1/32": {
+        "endpoint":"100.251.7.1",
+        "endpoint_monitor":"100.251.7.1"
+    },
+    "VNET_ROUTE_TUNNEL_TABLE:Vnet_v6_in_v6-0:fddd:a156:a251::a6:1/128": {
+        "endpoint": "fddd:a100:a251::a10:1,fddd:a101:a251::a10:1",
+        "endpoint_monitor":"fddd:a100:a251::a10:1,fddd:a101:a251::a10:1"
+    },
+    "VNET_ROUTE_TUNNEL_TABLE:test_v4_in_v4-0:160.162.191.1/32": {
+        "endpoint":"100.251.7.1",
+        "endpoint_monitor":"100.251.7.1"
+    },
+    "VNET_ROUTE_TUNNEL_TABLE:test_v4_in_v4-0:160.164.191.1/32": {
+        "endpoint":"100.251.7.1",
+        "endpoint_monitor":"100.251.7.1"
+    },
+    "BGP_PROFILE_TABLE:FROM_SDN_SLB_ROUTES": {
+        "community_id" : "1234:1235"
     }
 }

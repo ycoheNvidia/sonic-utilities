@@ -66,7 +66,6 @@ Ethernet8: SFP EEPROM detected
         Application Advertisement: 400GAUI-8 C2M (Annex 120E) - Active Cable assembly with BER < 2.6x10^-4
 				   IB EDR (Arch.Spec.Vol.2) - Active Cable assembly with BER < 5x10^-5
 				   IB QDR (Arch.Spec.Vol.2) - Active Cable assembly with BER < 10^-12
-				   
         Connector: No separable connector
         Encoding: Not supported for CMIS cables
         Extended Identifier: Power Class 1(10.0W Max)
@@ -75,13 +74,13 @@ Ethernet8: SFP EEPROM detected
         Length Cable Assembly(m): 10
         Nominal Bit Rate(100Mbs): Not supported for CMIS cables
         Specification compliance: Not supported for CMIS cables
-        Vendor Date Code(YYYY-MM-DD Lot): 2020-05-22 
+        Vendor Date Code(YYYY-MM-DD Lot): 2020-05-22
         Vendor Name: INNOLIGHT
         Vendor OUI: 44-7c-7f
         Vendor PN: C-DQ8FNM010-N00
         Vendor Rev: 2A
         Vendor SN: INKAO2900002A
-        ChannelMonitorValues: 
+        ChannelMonitorValues:
                 RX1Power: -3.8595dBm
                 RX2Power: 8.1478dBm
                 RX3Power: -22.9243dBm
@@ -98,15 +97,15 @@ Ethernet8: SFP EEPROM detected
                 TX3Power: 1.175dBm
                 TX4Bias: 0.0000mA
                 TX4Power: 1.175dBm
-                TX5Bias: 0.0000mAmA
+                TX5Bias: 0.0000mA
                 TX5Power: 1.175dBm
-                TX6Bias: 8.2240mAmA
+                TX6Bias: 8.2240mA
                 TX6Power: 1.175dBm
-                TX7Bias: 8.2240mAmA
+                TX7Bias: 8.2240mA
                 TX7Power: 1.175dBm
-                TX8Bias: 8.2240mAmA
+                TX8Bias: 8.2240mA
                 TX8Power: 1.175dBm
-        ChannelThresholdValues: 
+        ChannelThresholdValues:
                 RxPowerHighAlarm  : 6.9999dBm
                 RxPowerHighWarning: 4.9999dBm
                 RxPowerLowAlarm   : -11.9044dBm
@@ -119,10 +118,10 @@ Ethernet8: SFP EEPROM detected
                 TxPowerHighWarning: 4.9999dBm
                 TxPowerLowAlarm   : -10.5012dBm
                 TxPowerLowWarning : -7.5007dBm
-        ModuleMonitorValues: 
+        ModuleMonitorValues:
                 Temperature: 44.9883C
                 Vcc: 3.2999Volts
-        ModuleThresholdValues: 
+        ModuleThresholdValues:
                 TempHighAlarm  : 80.0000C
                 TempHighWarning: 75.0000C
                 TempLowAlarm   : -10.0000C
@@ -158,7 +157,6 @@ Ethernet8: SFP EEPROM detected
         Application Advertisement: 400GAUI-8 C2M (Annex 120E) - Active Cable assembly with BER < 2.6x10^-4
 				   IB EDR (Arch.Spec.Vol.2) - Active Cable assembly with BER < 5x10^-5
 				   IB QDR (Arch.Spec.Vol.2) - Active Cable assembly with BER < 10^-12
-				   
         Connector: No separable connector
         Encoding: Not supported for CMIS cables
         Extended Identifier: Power Class 1(10.0W Max)
@@ -167,12 +165,54 @@ Ethernet8: SFP EEPROM detected
         Length Cable Assembly(m): 10
         Nominal Bit Rate(100Mbs): Not supported for CMIS cables
         Specification compliance: Not supported for CMIS cables
-        Vendor Date Code(YYYY-MM-DD Lot): 2020-05-22 
+        Vendor Date Code(YYYY-MM-DD Lot): 2020-05-22
         Vendor Name: INNOLIGHT
         Vendor OUI: 44-7c-7f
         Vendor PN: C-DQ8FNM010-N00
         Vendor Rev: 2A
         Vendor SN: INKAO2900002A
+"""
+
+test_qsfp_dd_eeprom_adv_app_output = """\
+Ethernet40: SFP EEPROM detected
+        Application Advertisement: 400G CR8 - Host Assign (0x1) - Copper cable - Media Assign (0x2)
+                                   200GBASE-CR4 (Clause 136) - Host Assign (Unknown) - Unknown - Media Assign (Unknown)
+        Connector: No separable connector
+        Encoding: Not supported for CMIS cables
+        Extended Identifier: Power Class 1(10.0W Max)
+        Extended RateSelect Compliance: Not supported for CMIS cables
+        Identifier: QSFP-DD Double Density 8X Pluggable Transceiver
+        Length Cable Assembly(m): 10
+        Nominal Bit Rate(100Mbs): Not supported for CMIS cables
+        Specification compliance: Not supported for CMIS cables
+        Vendor Date Code(YYYY-MM-DD Lot): 2020-05-22
+        Vendor Name: INNOLIGHT
+        Vendor OUI: 44-7c-7f
+        Vendor PN: C-DQ8FNM010-N00
+        Vendor Rev: 2A
+        Vendor SN: INKAO2900002A
+"""
+
+test_qsfp_dd_pm_output = """\
+Ethernet44:
+    Parameter        Unit    Min       Avg       Max       Threshold    Threshold    Threshold     Threshold    Threshold    Threshold
+                                                           High         High         Crossing      Low          Low          Crossing
+                                                           Alarm        Warning      Alert-High    Alarm        Warning      Alert-Low
+    ---------------  ------  --------  --------  --------  -----------  -----------  ------------  -----------  -----------  -----------
+    Tx Power         dBm     -8.22     -8.23     -8.24     -5.0         -6.0         False         -16.99       -16.003      False
+    Rx Total Power   dBm     -10.61    -10.62    -10.62    2.0          0.0          False         -21.0        -18.0        False
+    Rx Signal Power  dBm     -40.0     0.0       40.0      13.0         10.0         True          -18.0        -15.0        True
+    CD-short link    ps/nm   0.0       0.0       0.0       1000.0       500.0        False         -1000.0      -500.0       False
+    PDL              dB      0.5       0.6       0.6       4.0          4.0          False         0.0          0.0          False
+    OSNR             dB      36.5      36.5      36.5      99.0         99.0         False         0.0          0.0          False
+    eSNR             dB      30.5      30.5      30.5      99.0         99.0         False         0.0          0.0          False
+    CFO              MHz     54.0      70.0      121.0     3800.0       3800.0       False         -3800.0      -3800.0      False
+    DGD              ps      5.37      5.56      5.81      7.0          7.0          False         0.0          0.0          False
+    SOPMD            ps^2    0.0       0.0       0.0       655.35       655.35       False         0.0          0.0          False
+    SOP ROC          krad/s  1.0       1.0       2.0       N/A          N/A          N/A           N/A          N/A          N/A
+    Pre-FEC BER      N/A     4.58E-04  4.66E-04  5.76E-04  1.25E-02     1.10E-02     0.0           0.0          0.0          0.0
+    Post-FEC BER     N/A     0.0       0.0       0.0       1000.0       1.0          False         0.0          0.0          False
+    EVM              %       100.0     100.0     100.0     N/A          N/A          N/A           N/A          N/A          N/A
 """
 
 test_sfp_eeprom_dom_all_output = """\
@@ -323,6 +363,14 @@ Ethernet4   Not present
 Ethernet64  Present
 """
 
+test_qsfp_dd_pm_all_output = """\
+Ethernet0: Transceiver performance monitoring not applicable
+
+Ethernet4: Transceiver performance monitoring not applicable
+
+Ethernet64: Transceiver performance monitoring not applicable
+"""
+
 class TestSFP(object):
     @classmethod
     def setup_class(cls):
@@ -390,7 +438,7 @@ Ethernet36  Present
         runner = CliRunner()
         result = runner.invoke(show.cli.commands["interfaces"].commands["transceiver"].commands["eeprom"], ["Ethernet8 -d"])
         assert result.exit_code == 0
-        assert "result.output == test_qsfp_dd_eeprom_with_dom_output"
+        assert result.output == test_qsfp_dd_eeprom_with_dom_output
 
     def test_sfp_eeprom(self):
         runner = CliRunner()
@@ -407,13 +455,31 @@ Ethernet36  Present
         runner = CliRunner()
         result = runner.invoke(show.cli.commands["interfaces"].commands["transceiver"].commands["eeprom"], ["Ethernet8"])
         assert result.exit_code == 0
-        assert "result.output == test_qsfp_dd_eeprom_output"
+        assert result.output == test_qsfp_dd_eeprom_output
+
+    def test_qsfp_dd_eeprom_adv_app(self):
+        runner = CliRunner()
+        result = runner.invoke(show.cli.commands["interfaces"].commands["transceiver"].commands["eeprom"], ["Ethernet40"])
+        assert result.exit_code == 0
+        print(result.output)
+        assert result.output == test_qsfp_dd_eeprom_adv_app_output
 
     def test_rj45_eeprom(self):
         runner = CliRunner()
         result = runner.invoke(show.cli.commands["interfaces"].commands["transceiver"].commands["eeprom"], ["Ethernet36"])
         result_lines = result.output.strip('\n')
         expected = "Ethernet36: SFP EEPROM is not applicable for RJ45 port"
+        assert result_lines == expected
+
+    def test_qsfp_dd_pm(self):
+        runner = CliRunner()
+        result = runner.invoke(show.cli.commands["interfaces"].commands["transceiver"].commands["pm"], ["Ethernet44"])
+        assert result.exit_code == 0
+        assert "\n".join([ l.rstrip() for l in result.output.split('\n')]) == test_qsfp_dd_pm_output
+
+        result = runner.invoke(show.cli.commands["interfaces"].commands["transceiver"].commands["pm"], ["Ethernet200"])
+        result_lines = result.output.strip('\n')
+        expected = "Ethernet200: Transceiver performance monitoring not applicable"
         assert result_lines == expected
 
     @classmethod
@@ -472,15 +538,11 @@ Ethernet200  Not present
         expected = "Ethernet200: SFP EEPROM Not detected"
         assert result_lines == expected
 
-    def test_sfp_eeprom_with_ns(self):
+    def test_qsfp_dd_pm_with_ns(self):
         runner = CliRunner()
-        result = runner.invoke(show.cli.commands["interfaces"].commands["transceiver"].commands["eeprom"], ["Ethernet0 -n asic0"])
-        assert result.exit_code == 0
-        assert "\n".join([ l.rstrip() for l in result.output.split('\n')]) == test_sfp_eeprom_output
-
-        result = runner.invoke(show.cli.commands["interfaces"].commands["transceiver"].commands["eeprom"], ["Ethernet200 -n asic0"])
+        result = runner.invoke(show.cli.commands["interfaces"].commands["transceiver"].commands["pm"], ["Ethernet0 -n asic0"])
         result_lines = result.output.strip('\n')
-        expected = "Ethernet200: SFP EEPROM Not detected"
+        expected = "Ethernet0: Transceiver performance monitoring not applicable"
         assert result_lines == expected
 
     def test_sfp_eeprom_all(self):
@@ -501,6 +563,12 @@ Ethernet200  Not present
         if 'sonic_platform' in sys.modules:
             sys.modules.pop('sonic_platform')
         assert platform_sfputil_helper.is_rj45_port("Ethernet0") == False
+
+    def test_qsfp_dd_pm_all(self):
+        runner = CliRunner()
+        result = runner.invoke(show.cli.commands["interfaces"].commands["transceiver"].commands["pm"])
+        assert result.exit_code == 0
+        assert "\n".join([ l.rstrip() for l in result.output.split('\n')]) == test_qsfp_dd_pm_all_output
 
     @classmethod
     def teardown_class(cls):

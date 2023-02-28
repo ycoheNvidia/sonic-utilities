@@ -409,4 +409,112 @@ class TestGlobalDscpToTcMapMigrator(object):
         dbmgtr_mlnx.migrate()
         resulting_table = dbmgtr_mlnx.configDB.get_table('PORT_QOS_MAP')
         assert resulting_table == {}
+        
+class TestMoveLoggerTablesInWarmUpgrade(object):
+    @classmethod
+    def setup_class(cls):
+        os.environ['UTILITIES_UNIT_TESTING'] = "2"
 
+    @classmethod
+    def teardown_class(cls):
+        os.environ['UTILITIES_UNIT_TESTING'] = "0"
+        dbconnector.dedicated_dbs['CONFIG_DB'] = None
+        dbconnector.dedicated_dbs['LOGLEVEL_DB'] = None
+        dbconnector.dedicated_dbs['STATE_DB'] = None
+
+    def mock_dedicated_loglevel_db(self, filename):
+        jsonfile = os.path.join(mock_db_path, 'loglevel_db', filename)
+        dbconnector.dedicated_dbs['LOGLEVEL_DB'] = jsonfile
+        loglevel_db = SonicV2Connector(host='127.0.0.1')
+        loglevel_db.connect(loglevel_db.LOGLEVEL_DB)
+        return loglevel_db
+
+    def test_move_logger_tables_in_warm_upgrade(self):
+        device_info.get_sonic_version_info = get_sonic_version_info_mlnx
+
+        dbconnector.dedicated_dbs['CONFIG_DB'] = os.path.join(mock_db_path, 'config_db', 'logger_tables_input')
+        dbconnector.dedicated_dbs['LOGLEVEL_DB'] = os.path.join(mock_db_path, 'loglevel_db', 'logger_tables_input')
+        dbconnector.dedicated_dbs['STATE_DB'] = os.path.join(mock_db_path, 'state_db')
+
+        import db_migrator
+        dbmgtr = db_migrator.DBMigrator(None)
+        dbmgtr.migrate()
+
+        dbconnector.dedicated_dbs['CONFIG_DB'] = os.path.join(mock_db_path, 'config_db', 'logger_tables_expected')
+        dbconnector.dedicated_dbs['LOGLEVEL_DB'] = os.path.join(mock_db_path, 'loglevel_db', 'logger_tables_expected')
+
+        expected_db = Db()
+
+        resulting_table = dbmgtr.configDB.get_table('LOGGER')
+        expected_table = expected_db.cfgdb.get_table('LOGGER')
+
+        diff = DeepDiff(resulting_table, expected_table, ignore_order=True)
+        assert not diff
+
+class TestWarmUpgrade_to_2_0_2(object):
+    @classmethod
+    def setup_class(cls):
+        os.environ['UTILITIES_UNIT_TESTING'] = "2"
+
+    @classmethod
+    def teardown_class(cls):
+        os.environ['UTILITIES_UNIT_TESTING'] = "0"
+        dbconnector.dedicated_dbs['CONFIG_DB'] = None
+
+    def test_warm_upgrade_to_2_0_2(self):
+        dbconnector.dedicated_dbs['CONFIG_DB'] = os.path.join(mock_db_path, 'config_db', 'cross_branch_upgrade_to_version_2_0_2_input')
+        import db_migrator
+        dbmgtr = db_migrator.DBMigrator(None)
+        dbmgtr.migrate()
+        dbconnector.dedicated_dbs['CONFIG_DB'] = os.path.join(mock_db_path, 'config_db', 'cross_branch_upgrade_to_version_2_0_2_expected')
+        expected_db = Db()
+
+        expected_db
+        new_tables = ["RESTAPI", "TELEMETRY", "CONSOLE_SWITCH"]
+        for table in new_tables:
+            resulting_table = dbmgtr.configDB.get_table(table)
+            expected_table = expected_db.cfgdb.get_table(table)
+            diff = DeepDiff(resulting_table, expected_table, ignore_order=True)
+            assert not diff
+
+class Test_Migrate_Loopback(object):
+    @classmethod
+    def setup_class(cls):
+        os.environ['UTILITIES_UNIT_TESTING'] = "2"
+
+    @classmethod
+    def teardown_class(cls):
+        os.environ['UTILITIES_UNIT_TESTING'] = "0"
+        dbconnector.dedicated_dbs['CONFIG_DB'] = None
+        dbconnector.dedicated_dbs['APPL_DB'] = None
+
+    def test_migrate_loopback_int(self):
+        dbconnector.dedicated_dbs['CONFIG_DB'] = os.path.join(mock_db_path, 'config_db', 'loopback_interface_migrate_from_1_0_1_input')
+        dbconnector.dedicated_dbs['APPL_DB'] = os.path.join(mock_db_path, 'appl_db', 'loopback_interface_migrate_from_1_0_1_input')
+
+        import db_migrator
+        dbmgtr = db_migrator.DBMigrator(None)
+        dbmgtr.migrate()
+        dbconnector.dedicated_dbs['CONFIG_DB'] = os.path.join(mock_db_path, 'config_db', 'loopback_interface_migrate_from_1_0_1_expected')
+        dbconnector.dedicated_dbs['APPL_DB'] = os.path.join(mock_db_path, 'appl_db', 'loopback_interface_migrate_from_1_0_1_expected')
+        expected_db = Db()
+
+        # verify migrated configDB
+        resulting_table = dbmgtr.configDB.get_table("LOOPBACK_INTERFACE")
+        expected_table = expected_db.cfgdb.get_table("LOOPBACK_INTERFACE")
+        diff = DeepDiff(resulting_table, expected_table, ignore_order=True)
+        assert not diff
+
+        # verify migrated appDB
+        expected_appl_db = SonicV2Connector(host='127.0.0.1')
+        expected_appl_db.connect(expected_appl_db.APPL_DB)
+        expected_keys = expected_appl_db.keys(expected_appl_db.APPL_DB, "INTF_TABLE:*")
+        expected_keys.sort()
+        resulting_keys = dbmgtr.appDB.keys(dbmgtr.appDB.APPL_DB, "INTF_TABLE:*")
+        resulting_keys.sort()
+        assert expected_keys == resulting_keys
+        for key in expected_keys:
+            resulting_keys = dbmgtr.appDB.get_all(dbmgtr.appDB.APPL_DB, key)
+            expected_keys = expected_appl_db.get_all(expected_appl_db.APPL_DB, key)
+            diff = DeepDiff(resulting_keys, expected_keys, ignore_order=True)
+            assert not diff
