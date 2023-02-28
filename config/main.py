@@ -1549,7 +1549,8 @@ def reload(db, filename, yes, load_sysinfo, no_service_restart, force, file_form
     if not yes:
         click.confirm(message, abort=True)
 
-    log.log_info("'reload' executing...")
+    argv_str = ' '.join(['config', *sys.argv[1:]])
+    log.log_notice(f"'reload' executing with command: {argv_str}")
 
     num_asic = multi_asic.get_num_asics()
     cfg_files = []
@@ -1569,7 +1570,7 @@ def reload(db, filename, yes, load_sysinfo, no_service_restart, force, file_form
 
     #Stop services before config push
     if not no_service_restart:
-        log.log_info("'reload' stopping services...")
+        log.log_notice("'reload' stopping services...")
         _stop_services()
 
     # In Single ASIC platforms we have single DB service. In multi-ASIC platforms we have a global DB
@@ -1678,7 +1679,7 @@ def reload(db, filename, yes, load_sysinfo, no_service_restart, force, file_form
     # status from all services before we attempt to restart them
     if not no_service_restart:
         _reset_failed_services()
-        log.log_info("'reload' restarting services...")
+        log.log_notice("'reload' restarting services...")
         _restart_services()
 
 @config.command("load_mgmt_config")
@@ -1725,11 +1726,12 @@ def load_mgmt_config(filename):
 @clicommon.pass_db
 def load_minigraph(db, no_service_restart, traffic_shift_away, override_config, golden_config_path):
     """Reconfigure based on minigraph."""
-    log.log_info("'load_minigraph' executing...")
+    argv_str = ' '.join(['config', *sys.argv[1:]])
+    log.log_notice(f"'load_minigraph' executing with command: {argv_str}")
 
     #Stop services before config push
     if not no_service_restart:
-        log.log_info("'load_minigraph' stopping services...")
+        log.log_notice("'load_minigraph' stopping services...")
         _stop_services()
 
     # For Single Asic platform the namespace list has the empty string
@@ -1793,7 +1795,7 @@ def load_minigraph(db, no_service_restart, traffic_shift_away, override_config, 
                 cfggen_namespace_option = " -n {}".format(namespace)
             clicommon.run_command(db_migrator + ' -o set_version' + cfggen_namespace_option)
 
-    # Keep device isolated with TSA 
+    # Keep device isolated with TSA
     if traffic_shift_away:
         clicommon.run_command("TSA", display_cmd=True)
         if override_config:
@@ -1815,7 +1817,7 @@ def load_minigraph(db, no_service_restart, traffic_shift_away, override_config, 
     if not no_service_restart:
         _reset_failed_services()
         #FIXME: After config DB daemon is implemented, we'll no longer need to restart every service.
-        log.log_info("'load_minigraph' restarting services...")
+        log.log_notice("'load_minigraph' restarting services...")
         _restart_services()
     click.echo("Please note setting loaded from minigraph will be lost after system reboot. To preserve setting, run `config save`.")
 
@@ -2007,8 +2009,20 @@ def synchronous_mode(sync_mode):
     Option 2. systemctl restart swss""" % sync_mode)
 
 #
+# 'suppress-fib-pending' command ('config suppress-fib-pending ...')
+#
+@config.command('suppress-fib-pending')
+@click.argument('state', metavar='<enabled|disabled>', required=True, type=click.Choice(['enabled', 'disabled']))
+@clicommon.pass_db
+def suppress_pending_fib(db, state):
+    ''' Enable or disable pending FIB suppression. Once enabled, BGP will not advertise routes that are not yet installed in the hardware '''
+
+    config_db = db.cfgdb
+    config_db.mod_entry('DEVICE_METADATA' , 'localhost', {"suppress-fib-pending" : state})
+
+#
 # 'yang_config_validation' command ('config yang_config_validation ...')
-# 
+#
 @config.command('yang_config_validation')
 @click.argument('yang_config_validation', metavar='<enable|disable>', required=True)
 def yang_config_validation(yang_config_validation):
