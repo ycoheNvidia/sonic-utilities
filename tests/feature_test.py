@@ -3,11 +3,14 @@ import pytest
 
 from unittest import mock
 from contextlib import ExitStack
+from mock import patch
 
 from click.testing import CliRunner
 
 from utilities_common.db import Db
 from swsscommon import swsscommon
+
+import config.validated_config_db_connector as validated_config_db_connector
 
 show_feature_status_output="""\
 Feature     State           AutoRestart     SetOwner
@@ -125,6 +128,32 @@ swss        enabled
 syncd       enabled
 teamd       enabled
 telemetry   enabled
+"""
+
+show_feature_autorestart_missing_output="""\
+Feature     AutoRestart
+----------  --------------
+bar         unknown
+bgp         enabled
+database    always_enabled
+dhcp_relay  enabled
+lldp        enabled
+nat         enabled
+pmon        enabled
+radv        enabled
+restapi     enabled
+sflow       enabled
+snmp        enabled
+swss        enabled
+syncd       enabled
+teamd       enabled
+telemetry   enabled
+"""
+
+show_feature_autorestart_bar_missing_output="""\
+Feature    AutoRestart
+---------  -------------
+bar        unknown
 """
 
 show_feature_bgp_autorestart_output="""\
@@ -274,6 +303,25 @@ class TestFeature(object):
         print(result.output)
         assert result.exit_code == 1
 
+    def test_show_feature_autorestart_missing(self, get_cmd_module):
+        (config, show) = get_cmd_module
+        db = Db()
+        dbconn = db.db
+        db.cfgdb.set_entry("FEATURE", "bar", { "state": "enabled" })
+        runner = CliRunner()
+
+        result = runner.invoke(show.cli.commands["feature"].commands["autorestart"], obj=db)
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code == 0
+        assert result.output == show_feature_autorestart_missing_output
+
+        result = runner.invoke(show.cli.commands["feature"].commands["autorestart"], ["bar"], obj=db)
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code == 0
+        assert result.output == show_feature_autorestart_bar_missing_output
+
     def test_config_bgp_feature_state(self, get_cmd_module):
         (config, show) = get_cmd_module
         db = Db()
@@ -304,6 +352,17 @@ class TestFeature(object):
         print(result.exit_code)
         print(result.output)
         assert result.exit_code == rc
+
+    @patch("validated_config_db_connector.device_info.is_yang_config_validation_enabled", mock.Mock(retur_value=True))
+    @patch("config.validated_config_db_connector.ValidatedConfigDBConnector.validated_mod_entry", mock.Mock(side_effect=ValueError))
+    def test_config_snmp_feature_owner_yang(self, get_cmd_module):
+        (config, show) = get_cmd_module
+        db = Db()
+        runner = CliRunner()
+        result = runner.invoke(config.config.commands["feature"].commands["owner"], ["snmp", "local"], obj=db)
+        print(result.exit_code)
+        print(result.output)
+        assert "Invalid ConfigDB. Error" in result.output
 
     def test_config_snmp_feature_owner(self, get_cmd_module):
         (config, show) = get_cmd_module
@@ -360,6 +419,17 @@ class TestFeature(object):
         assert result.exit_code == 0
         assert result.output == show_feature_bgp_disabled_autorestart_output
 
+    @patch("validated_config_db_connector.device_info.is_yang_config_validation_enabled", mock.Mock(return_value=True))
+    @patch("config.validated_config_db_connector.ValidatedConfigDBConnector.validated_mod_entry", mock.Mock(side_effect=ValueError))
+    def test_config_database_feature_state_yang(self, get_cmd_module):
+        (config, show) = get_cmd_module
+        db = Db()
+        runner = CliRunner()
+        result = runner.invoke(config.config.commands["feature"].commands["state"], ["bgp", "disabled"], obj=db)
+        print(result.exit_code)
+        print(result.output)
+        assert "Invalid ConfigDB. Error" in result.output
+
     def test_config_database_feature_state(self, get_cmd_module):
         (config, show) = get_cmd_module
         db = Db()
@@ -378,6 +448,17 @@ class TestFeature(object):
         print(result.output)
         assert result.exit_code == 0
         assert result.output == show_feature_database_always_enabled_state_output
+
+    @patch("validated_config_db_connector.device_info.is_yang_config_validation_enabled", mock.Mock(retur_value=True))
+    @patch("config.validated_config_db_connector.ValidatedConfigDBConnector.validated_mod_entry", mock.Mock(side_effect=ValueError))
+    def test_config_bgp_feature_autorestart_yang(self, get_cmd_module):
+        (config, show) = get_cmd_module
+        db = Db()
+        runner = CliRunner()
+        result = runner.invoke(config.config.commands["feature"].commands["autorestart"], ["bgp", "enabled"], obj=db)
+        print(result.exit_code)
+        print(result.output)
+        assert "Invalid ConfigDB. Error" in result.output
 
     def test_config_database_feature_autorestart(self, get_cmd_module):
         (config, show) = get_cmd_module

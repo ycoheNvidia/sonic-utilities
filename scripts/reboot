@@ -33,7 +33,7 @@ EXIT_PLATFORM_FW_AU_FAILURE=22
 PLATFORM_FWUTIL_AU_REBOOT_HANDLE="platform_fw_au_reboot_handle"
 REBOOT_SCRIPT_NAME=$(basename $0)
 REBOOT_TYPE="${REBOOT_SCRIPT_NAME}"
-TAG_LATEST=yes
+TAG_LATEST=no
 
 function debug()
 {
@@ -121,6 +121,7 @@ function show_help_and_exit()
     echo " "
     echo "    Available options:"
     echo "        -h, -? : getting this help"
+    echo "        -f     : execute reboot force"
 
     exit 0
 }
@@ -171,7 +172,7 @@ function check_conflict_boot_in_fw_update()
 
 function parse_options()
 {
-    while getopts "h?v" opt; do
+    while getopts "h?vf" opt; do
         case ${opt} in
             h|\? )
                 show_help_and_exit

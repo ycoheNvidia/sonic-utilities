@@ -19,6 +19,7 @@ from utilities_common.db import Db
 from datetime import datetime
 import utilities_common.constants as constants
 from utilities_common.general import load_db_config
+from json.decoder import JSONDecodeError
 
 # mock the redis for unit test purposes #
 try:
@@ -41,6 +42,7 @@ from . import acl
 from . import bgp_common
 from . import chassis_modules
 from . import dropcounters
+from . import fabric
 from . import feature
 from . import fgnhg
 from . import flow_counters
@@ -127,6 +129,10 @@ def run_command(command, display_cmd=False, return_cmd=False):
     rc = proc.poll()
     if rc != 0:
         sys.exit(rc)
+
+def get_cmd_output(cmd):
+    proc = subprocess.Popen(cmd, text=True, stdout=subprocess.PIPE)
+    return proc.communicate()[0], proc.returncode
 
 # Lazy global class instance for SONiC interface name to alias conversion
 iface_alias_converter = lazy_object_proxy.Proxy(lambda: clicommon.InterfaceAliasConverter())
@@ -263,6 +269,7 @@ def cli(ctx):
 cli.add_command(acl.acl)
 cli.add_command(chassis_modules.chassis)
 cli.add_command(dropcounters.dropcounters)
+cli.add_command(fabric.fabric)
 cli.add_command(feature.feature)
 cli.add_command(fgnhg.fgnhg)
 cli.add_command(flow_counters.flowcnt_route)
@@ -325,6 +332,7 @@ def vrf(vrf_name):
             vrfs = [vrf_name]
         for vrf in vrfs:
             intfs = get_interface_bind_to_vrf(config_db, vrf)
+            intfs = natsorted(intfs)
             if len(intfs) == 0:
                 body.append([vrf, ""])
             else:
@@ -332,6 +340,32 @@ def vrf(vrf_name):
                 for intf in intfs[1:]:
                     body.append(["", intf])
     click.echo(tabulate(body, header))
+
+#
+# 'events' command ("show event-counters")
+#
+
+@cli.command()
+def event_counters():
+    """Show events counter"""
+    # dump keys as formatted
+    counters_db = SonicV2Connector(host='127.0.0.1')
+    counters_db.connect(counters_db.COUNTERS_DB, retry_on=False)
+
+    header = ['name', 'count']
+    keys = counters_db.keys(counters_db.COUNTERS_DB, 'COUNTERS_EVENTS*')
+    table = []
+
+    for key in natsorted(keys):
+        key_list = key.split(':')
+        data_dict = counters_db.get_all(counters_db.COUNTERS_DB, key)
+        table.append((key_list[1], data_dict["value"]))
+
+    if table:
+        click.echo(tabulate(table, header, tablefmt='simple', stralign='right'))
+    else:
+        click.echo('No data available in COUNTERS_EVENTS\n')
+
 
 #
 # 'arp' command ("show arp")
@@ -670,10 +704,11 @@ def queue():
 # 'counters' subcommand ("show queue counters")
 @queue.command()
 @click.argument('interfacename', required=False)
+@multi_asic_util.multi_asic_click_options
 @click.option('--verbose', is_flag=True, help="Enable verbose output")
 @click.option('--json', is_flag=True, help="JSON output")
 @click.option('--voq', is_flag=True, help="VOQ counters")
-def counters(interfacename, verbose, json, voq):
+def counters(interfacename, namespace, display, verbose, json, voq):
     """Show queue counters"""
 
     cmd = "queuestat"
@@ -684,6 +719,9 @@ def counters(interfacename, verbose, json, voq):
 
     if interfacename is not None:
         cmd += " -p {}".format(interfacename)
+
+    if namespace is not None:
+        cmd += " -n {}".format(namespace)
 
     if json:
         cmd += " -j"
@@ -1219,14 +1257,18 @@ def table(verbose):
 @click.option('--verbose', is_flag=True, help="Enable verbose output")
 def logging(process, lines, follow, verbose):
     """Show system log"""
+    if os.path.exists("/var/log.tmpfs"):
+        log_path = "/var/log.tmpfs"
+    else:
+        log_path = "/var/log"
     if follow:
-        cmd = "sudo tail -F /var/log/syslog"
+        cmd = "sudo tail -F {}/syslog".format(log_path)
         run_command(cmd, display_cmd=verbose)
     else:
-        if os.path.isfile("/var/log/syslog.1"):
-            cmd = "sudo cat /var/log/syslog.1 /var/log/syslog"
+        if os.path.isfile("{}/syslog.1".format(log_path)):
+            cmd = "sudo cat {}/syslog.1 {}/syslog".format(log_path, log_path)
         else:
-            cmd = "sudo cat /var/log/syslog"
+            cmd = "sudo cat {}/syslog".format(log_path)
 
         if process is not None:
             cmd += " | grep '{}'".format(process)
@@ -1318,14 +1360,14 @@ def techsupport(since, global_timeout, cmd_timeout, verbose, allow_process_stop,
     if global_timeout:
         cmd += " timeout --kill-after={}s -s SIGTERM --foreground {}m".format(COMMAND_TIMEOUT, global_timeout)
 
-    if allow_process_stop:
-        cmd += " -a"
-
     if silent:
         cmd += " generate_dump"
         click.echo("Techsupport is running with silent option. This command might take a long time.")
     else:
         cmd += " generate_dump -v"
+
+    if allow_process_stop:
+        cmd += " -a"
 
     if since:
         cmd += " -s '{}'".format(since)
@@ -1354,8 +1396,25 @@ def runningconfiguration():
 @click.option('--verbose', is_flag=True, help="Enable verbose output")
 def all(verbose):
     """Show full running configuration"""
-    cmd = "sonic-cfggen -d --print-data"
-    run_command(cmd, display_cmd=verbose)
+    cmd = ['sonic-cfggen', '-d', '--print-data']
+    stdout, rc = get_cmd_output(cmd)
+    if rc:
+        click.echo("Failed to get cmd output '{}':rc {}".format(cmd, rc))
+        raise click.Abort()
+
+    try:
+        output = json.loads(stdout)
+    except JSONDecodeError as e:
+        click.echo("Failed to load output '{}':{}".format(cmd, e))
+        raise click.Abort()
+
+    if not multi_asic.is_multi_asic():
+        bgpraw_cmd = [constants.RVTYSH_COMMAND, '-c', 'show running-config']
+        bgpraw, rc = get_cmd_output(bgpraw_cmd)
+        if rc:
+            bgpraw = ""
+        output['bgpraw'] = bgpraw
+    click.echo(json.dumps(output, indent=4))
 
 
 # 'acl' subcommand ("show runningconfiguration acl")
@@ -1384,10 +1443,40 @@ def ports(portname, verbose):
 # 'bgp' subcommand ("show runningconfiguration bgp")
 @runningconfiguration.command()
 @click.option('--verbose', is_flag=True, help="Enable verbose output")
-def bgp(verbose):
-    """Show BGP running configuration"""
-    cmd = 'sudo {} -c "show running-config"'.format(constants.RVTYSH_COMMAND)
-    run_command(cmd, display_cmd=verbose)
+@click.option('--namespace', '-n', 'namespace', required=False, default=None, type=str, show_default=False,
+              help='Option needed for multi-asic only: provide namespace name',
+              callback=multi_asic_util.multi_asic_namespace_validation_callback)
+def bgp(namespace, verbose):
+    """
+    Show BGP running configuration
+    Note:
+        multi-asic can run 'show run bgp' and show from all asics, or 'show run bgp -n <ns>'
+        single-asic only run 'show run bgp', '-n' is not available
+    """
+
+    if multi_asic.is_multi_asic():
+        if namespace and namespace not in multi_asic.get_namespace_list():
+            ctx = click.get_current_context()
+            ctx.fail("invalid value for -n/--namespace option. provide namespace from list {}".format(multi_asic.get_namespace_list()))
+    if not multi_asic.is_multi_asic() and namespace:
+        ctx = click.get_current_context()
+        ctx.fail("-n/--namespace is not available for single asic")
+
+    output = ""
+    cmd = "show running-config bgp"
+    import utilities_common.bgp_util as bgp_util
+    if multi_asic.is_multi_asic():
+        if not namespace:
+            ns_list = multi_asic.get_namespace_list()
+            for ns in ns_list:
+                output += "\n------------Showing running config bgp on {}------------\n".format(ns)
+                output += bgp_util.run_bgp_show_command(cmd, ns)
+        else:
+            output += "\n------------Showing running config bgp on {}------------\n".format(namespace)
+            output += bgp_util.run_bgp_show_command(cmd, namespace)
+    else:
+        output += bgp_util.run_bgp_show_command(cmd)
+    print(output)
 
 
 # 'interfaces' subcommand ("show runningconfiguration interfaces")
@@ -1954,7 +2043,7 @@ def bfd():
 def summary(db):
     """Show bfd session information"""
     bfd_headers = ["Peer Addr", "Interface", "Vrf", "State", "Type", "Local Addr",
-                "TX Interval", "RX Interval", "Multiplier", "Multihop"]
+                "TX Interval", "RX Interval", "Multiplier", "Multihop", "Local Discriminator"]
 
     bfd_keys = db.db.keys(db.db.STATE_DB, "BFD_SESSION_TABLE|*")
 
@@ -1965,8 +2054,10 @@ def summary(db):
         for key in bfd_keys:
             key_values = key.split('|')
             values = db.db.get_all(db.db.STATE_DB, key)
+            if "local_discriminator" not in values.keys():
+                values["local_discriminator"] = "NA"            
             bfd_body.append([key_values[3], key_values[2], key_values[1], values["state"], values["type"], values["local_addr"],
-                                values["tx_interval"], values["rx_interval"], values["multiplier"], values["multihop"]])
+                                values["tx_interval"], values["rx_interval"], values["multiplier"], values["multihop"], values["local_discriminator"]])
 
     click.echo(tabulate(bfd_body, bfd_headers))
 
@@ -1978,7 +2069,7 @@ def summary(db):
 def peer(db, peer_ip):
     """Show bfd session information for BFD peer"""
     bfd_headers = ["Peer Addr", "Interface", "Vrf", "State", "Type", "Local Addr",
-                "TX Interval", "RX Interval", "Multiplier", "Multihop"]
+                "TX Interval", "RX Interval", "Multiplier", "Multihop", "Local Discriminator"]
 
     bfd_keys = db.db.keys(db.db.STATE_DB, "BFD_SESSION_TABLE|*|{}".format(peer_ip))
     delimiter = db.db.get_db_separator(db.db.STATE_DB)
@@ -1994,10 +2085,23 @@ def peer(db, peer_ip):
         for key in bfd_keys:
             key_values = key.split(delimiter)
             values = db.db.get_all(db.db.STATE_DB, key)
+            if "local_discriminator" not in values.keys():
+                values["local_discriminator"] = "NA"            
             bfd_body.append([key_values[3], key_values[2], key_values[1], values.get("state"), values.get("type"), values.get("local_addr"),
-                                values.get("tx_interval"), values.get("rx_interval"), values.get("multiplier"), values.get("multihop")])
+                                values.get("tx_interval"), values.get("rx_interval"), values.get("multiplier"), values.get("multihop"), values.get("local_discriminator")])
 
     click.echo(tabulate(bfd_body, bfd_headers))
+
+
+# 'suppress-fib-pending' subcommand ("show suppress-fib-pending")
+@cli.command('suppress-fib-pending')
+@clicommon.pass_db
+def suppress_pending_fib(db):
+    """ Show the status of suppress pending FIB feature """
+
+    field_values = db.cfgdb.get_entry('DEVICE_METADATA', 'localhost')
+    state = field_values.get('suppress-fib-pending', 'disabled').title()
+    click.echo(state)
 
 
 # Load plugins and register them

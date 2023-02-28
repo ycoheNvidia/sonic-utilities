@@ -307,9 +307,9 @@ def expected(db, interfacename):
             body.append([interfacename,
                          device,
                          neighbor_dict[interfacename]['port'],
-                         neighbor_metadata_dict[device]['lo_addr'],
-                         neighbor_metadata_dict[device]['mgmt_addr'],
-                         neighbor_metadata_dict[device]['type']])
+                         neighbor_metadata_dict[device]['lo_addr'] if 'lo_addr' in neighbor_metadata_dict[device] else 'None',
+                         neighbor_metadata_dict[device]['mgmt_addr'] if 'mgmt_addr' in neighbor_metadata_dict[device] else 'None',
+                         neighbor_metadata_dict[device]['type'] if 'type' in neighbor_metadata_dict[device] else 'None'])
         except KeyError:
             click.echo("No neighbor information available for interface {}".format(interfacename))
             return
@@ -320,9 +320,9 @@ def expected(db, interfacename):
                 body.append([port,
                              device,
                              neighbor_dict[port]['port'],
-                             neighbor_metadata_dict[device]['lo_addr'],
-                             neighbor_metadata_dict[device]['mgmt_addr'],
-                             neighbor_metadata_dict[device]['type']])
+                             neighbor_metadata_dict[device]['lo_addr'] if 'lo_addr' in neighbor_metadata_dict[device] else 'None',
+                             neighbor_metadata_dict[device]['mgmt_addr'] if 'mgmt_addr' in neighbor_metadata_dict[device] else 'None',
+                             neighbor_metadata_dict[device]['type'] if 'type' in neighbor_metadata_dict[device] else 'None'])
             except KeyError:
                 pass
 
@@ -435,6 +435,51 @@ def eeprom(interfacename, dump_dom, namespace, verbose):
 
     if dump_dom:
         cmd += " --dom"
+
+    if interfacename is not None:
+        interfacename = try_convert_interfacename_from_alias(ctx, interfacename)
+
+        cmd += " -p {}".format(interfacename)
+
+    if namespace is not None:
+        cmd += " -n {}".format(namespace)
+
+    clicommon.run_command(cmd, display_cmd=verbose)
+
+@transceiver.command()
+@click.argument('interfacename', required=False)
+@click.option('--namespace', '-n', 'namespace', default=None, show_default=True,
+              type=click.Choice(multi_asic_util.multi_asic_ns_choices()), help='Namespace name or all')
+@click.option('--verbose', is_flag=True, help="Enable verbose output")
+def pm(interfacename, namespace, verbose):
+    """Show interface transceiver performance monitoring information"""
+
+    ctx = click.get_current_context()
+
+    cmd = "sfpshow pm"
+
+    if interfacename is not None:
+        interfacename = try_convert_interfacename_from_alias(
+            ctx, interfacename)
+
+        cmd += " -p {}".format(interfacename)
+
+    if namespace is not None:
+        cmd += " -n {}".format(namespace)
+
+    clicommon.run_command(cmd, display_cmd=verbose)
+
+@transceiver.command()
+@click.argument('interfacename', required=False)
+@click.option('--namespace', '-n', 'namespace', default=None, show_default=True,
+              type=click.Choice(multi_asic_util.multi_asic_ns_choices()), help='Namespace name or all')
+@click.option('--verbose', is_flag=True, help="Enable verbose output")
+def info(interfacename, namespace, verbose):
+    """Show interface transceiver information"""
+
+    ctx = click.get_current_context()
+
+    cmd = "sfpshow info"
 
     if interfacename is not None:
         interfacename = try_convert_interfacename_from_alias(ctx, interfacename)

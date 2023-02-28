@@ -32,10 +32,17 @@ def name(vxlan_name):
         vxlan_map_keys = config_db.keys(config_db.CONFIG_DB,
                                         'VXLAN_TUNNEL_MAP{}{}{}*'.format(config_db.KEY_SEPARATOR, vxlan_name, config_db.KEY_SEPARATOR))
         if vxlan_map_keys:
-            vxlan_map_mapping = config_db.get_all(config_db.CONFIG_DB, vxlan_map_keys[0])
-            r.append(vxlan_map_keys[0].split(config_db.KEY_SEPARATOR, 2)[2])
-            r.append("{} -> {}".format(vxlan_map_mapping.get('vni'), vxlan_map_mapping.get('vlan')))
-        table.append(r)
+            for key in natsorted(vxlan_map_keys):
+                vxlan_map_mapping = config_db.get_all(config_db.CONFIG_DB, key)
+                r.append(key.split(config_db.KEY_SEPARATOR, 2)[2])
+                r.append("{} -> {}".format(vxlan_map_mapping.get('vni'), vxlan_map_mapping.get('vlan')))
+                table.append(r)
+                r = []
+                r.append(' ')
+                r.append(' ')
+                r.append(' ')
+        else:
+            table.append(r)
 
     click.echo(tabulate(table, header))
 
@@ -59,10 +66,17 @@ def tunnel():
         vxlan_map_keys = config_db.keys(config_db.CONFIG_DB,
                                         'VXLAN_TUNNEL_MAP{}{}{}*'.format(config_db.KEY_SEPARATOR, k, config_db.KEY_SEPARATOR))
         if vxlan_map_keys:
-            vxlan_map_mapping = config_db.get_all(config_db.CONFIG_DB, vxlan_map_keys[0])
-            r.append(vxlan_map_keys[0].split(config_db.KEY_SEPARATOR, 2)[2])
-            r.append("{} -> {}".format(vxlan_map_mapping.get('vni'), vxlan_map_mapping.get('vlan')))
-        table.append(r)
+            for key in natsorted(vxlan_map_keys):
+                vxlan_map_mapping = config_db.get_all(config_db.CONFIG_DB, key)
+                r.append(key.split(config_db.KEY_SEPARATOR, 2)[2])
+                r.append("{} -> {}".format(vxlan_map_mapping.get('vni'), vxlan_map_mapping.get('vlan')))
+                table.append(r)
+                r = []
+                r.append(' ')
+                r.append(' ')
+                r.append(' ')
+        else:
+            table.append(r)
 
     click.echo(tabulate(table, header))
 
@@ -84,14 +98,14 @@ def interface():
           vtepname = key1.pop();
           if 'src_ip' in vxlan_table[key]:
             vtep_sip = vxlan_table[key]['src_ip']
-          if vtep_sip is not '0.0.0.0':
+          if vtep_sip != '0.0.0.0':
              output = '\tVTEP Name : ' + vtepname + ', SIP  : ' + vxlan_table[key]['src_ip']
           else:
              output = '\tVTEP Name : ' + vtepname
 
           click.echo(output)
 
-    if vtep_sip is not '0.0.0.0':
+    if vtep_sip != '0.0.0.0':
        vxlan_table = config_db.get_table('VXLAN_EVPN_NVO')
        vxlan_keys = vxlan_table.keys()
        if vxlan_keys is not None:
@@ -293,8 +307,8 @@ def remotemac(remote_vtep_ip, count):
             vxlan_table = db.get_all(db.APPL_DB, key);
             if vxlan_table is None:
              continue
-            rmtip = vxlan_table['remote_vtep']
-            if remote_vtep_ip != 'all' and rmtip != remote_vtep_ip:
+            rmtip = vxlan_table.get('remote_vtep')
+            if remote_vtep_ip != 'all' and rmtip != remote_vtep_ip or rmtip is None:
                continue
             if count is None:
                body.append([vlan, mac, rmtip, vxlan_table['vni'], vxlan_table['type']])

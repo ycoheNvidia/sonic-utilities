@@ -15,10 +15,12 @@ from click.testing import CliRunner
 from sonic_py_common import device_info
 from utilities_common.db import Db
 from utilities_common.general import load_module_from_source
+from mock import patch
 
 from generic_config_updater.generic_updater import ConfigFormat
 
 import config.main as config
+import config.validated_config_db_connector as validated_config_db_connector
 
 # Add Test, module and script path.
 test_path = os.path.dirname(os.path.abspath(__file__))
@@ -36,7 +38,7 @@ mock_db_path = os.path.join(test_path, "config_reload_input")
 load_minigraph_command_output="""\
 Stopping SONiC target ...
 Running command: /usr/local/bin/sonic-cfggen -H -m --write-to-db
-Running command: config qos reload --no-dynamic-buffer
+Running command: config qos reload --no-dynamic-buffer --no-delay
 Running command: pfcwd start_default
 Restarting SONiC target ...
 Reloading Monit configuration ...
@@ -124,13 +126,13 @@ def mock_run_command_side_effect(*args, **kwargs):
 
     if kwargs.get('return_cmd'):
         if command == "systemctl list-dependencies --plain sonic-delayed.target | sed '1d'":
-            return 'snmp.timer'
+            return 'snmp.timer' , 0
         elif command == "systemctl list-dependencies --plain sonic.target | sed '1d'":
-            return 'swss'
+            return 'swss', 0
         elif command == "systemctl is-enabled snmp.timer":
-            return 'enabled'
+            return 'enabled', 0
         else:
-            return ''
+            return '', 0
 
 def mock_run_command_side_effect_disabled_timer(*args, **kwargs):
     command = args[0]
@@ -140,17 +142,17 @@ def mock_run_command_side_effect_disabled_timer(*args, **kwargs):
 
     if kwargs.get('return_cmd'):
         if command == "systemctl list-dependencies --plain sonic-delayed.target | sed '1d'":
-            return 'snmp.timer'
+            return 'snmp.timer', 0
         elif command == "systemctl list-dependencies --plain sonic.target | sed '1d'":
-            return 'swss'
+            return 'swss', 0
         elif command == "systemctl is-enabled snmp.timer":
-            return 'masked'
+            return 'masked', 0
         elif command == "systemctl show swss.service --property ActiveState --value":
-            return 'active'
+            return 'active', 0
         elif command == "systemctl show swss.service --property ActiveEnterTimestampMonotonic --value":
-            return '0'
+            return '0', 0
         else:
-            return ''
+            return '', 0
 
 def mock_run_command_side_effect_untriggered_timer(*args, **kwargs):
     command = args[0]
@@ -160,15 +162,15 @@ def mock_run_command_side_effect_untriggered_timer(*args, **kwargs):
 
     if kwargs.get('return_cmd'):
         if command == "systemctl list-dependencies --plain sonic-delayed.target | sed '1d'":
-            return 'snmp.timer'
+            return 'snmp.timer', 0
         elif command == "systemctl list-dependencies --plain sonic.target | sed '1d'":
-            return 'swss'
+            return 'swss', 0
         elif command == "systemctl is-enabled snmp.timer":
-            return 'enabled'
+            return 'enabled', 0
         elif command == "systemctl show snmp.timer --property=LastTriggerUSecMonotonic --value":
-            return '0'
+            return '0', 0
         else:
-            return ''
+            return '', 0
 
 def mock_run_command_side_effect_gnmi(*args, **kwargs):
     command = args[0]
@@ -178,13 +180,13 @@ def mock_run_command_side_effect_gnmi(*args, **kwargs):
 
     if kwargs.get('return_cmd'):
         if command == "systemctl list-dependencies --plain sonic-delayed.target | sed '1d'":
-            return 'gnmi.timer'
+            return 'gnmi.timer', 0
         elif command == "systemctl list-dependencies --plain sonic.target | sed '1d'":
-            return 'swss'
+            return 'swss', 0
         elif command == "systemctl is-enabled gnmi.timer":
-            return 'enabled'
+            return 'enabled', 0
         else:
-            return ''
+            return '', 0
 
 
 # Load sonic-cfggen from source since /usr/local/bin/sonic-cfggen does not have .py extension.
@@ -409,26 +411,38 @@ class TestLoadMinigraph(object):
                 assert result.exit_code == 0
                 assert expected_output in result.output
 
-    def test_load_minigraph_with_golden_config(self, get_cmd_module, setup_single_broadcom_asic):
-        with mock.patch(
-            "utilities_common.cli.run_command",
-            mock.MagicMock(side_effect=mock_run_command_side_effect)) as mock_run_command:
-            (config, show) = get_cmd_module
-            db = Db()
-            golden_config = {}
-            self.check_golden_config(db, config, golden_config,
-                                     "config override-config-table /etc/sonic/golden_config_db.json")
-
-    def check_golden_config(self, db, config, golden_config, expected_output):
+    def test_load_minigraph_with_non_exist_golden_config_path(self, get_cmd_module):
         def is_file_side_effect(filename):
             return True if 'golden_config' in filename else False
-        with mock.patch('os.path.isfile', mock.MagicMock(side_effect=is_file_side_effect)):
+        with mock.patch("utilities_common.cli.run_command", mock.MagicMock(side_effect=mock_run_command_side_effect)) as mock_run_command, \
+                mock.patch('os.path.isfile', mock.MagicMock(side_effect=is_file_side_effect)):
+            (config, show) = get_cmd_module
             runner = CliRunner()
-            result = runner.invoke(config.config.commands["load_minigraph"], ["-y"], obj=db)
-            print(result.exit_code)
-            print(result.output)
+            result = runner.invoke(config.config.commands["load_minigraph"], ["--override_config", "--golden_config_path", "non_exist.json", "-y"])
+            assert result.exit_code != 0
+            assert "Cannot find 'non_exist.json'" in result.output
+
+    def test_load_minigraph_with_specified_golden_config_path(self, get_cmd_module):
+        def is_file_side_effect(filename):
+            return True if 'golden_config' in filename else False
+        with mock.patch("utilities_common.cli.run_command", mock.MagicMock(side_effect=mock_run_command_side_effect)) as mock_run_command, \
+                mock.patch('os.path.isfile', mock.MagicMock(side_effect=is_file_side_effect)):
+            (config, show) = get_cmd_module
+            runner = CliRunner()
+            result = runner.invoke(config.config.commands["load_minigraph"], ["--override_config", "--golden_config_path",  "golden_config.json", "-y"])
             assert result.exit_code == 0
-            assert expected_output in result.output
+            assert "config override-config-table golden_config.json" in result.output
+
+    def test_load_minigraph_with_default_golden_config_path(self, get_cmd_module):
+        def is_file_side_effect(filename):
+            return True if 'golden_config' in filename else False
+        with mock.patch("utilities_common.cli.run_command", mock.MagicMock(side_effect=mock_run_command_side_effect)) as mock_run_command, \
+                mock.patch('os.path.isfile', mock.MagicMock(side_effect=is_file_side_effect)):
+            (config, show) = get_cmd_module
+            runner = CliRunner()
+            result = runner.invoke(config.config.commands["load_minigraph"], ["--override_config", "-y"])
+            assert result.exit_code == 0
+            assert "config override-config-table /etc/sonic/golden_config_db.json" in result.output
 
     def test_load_minigraph_with_traffic_shift_away(self, get_cmd_module):
         with mock.patch("utilities_common.cli.run_command", mock.MagicMock(side_effect=mock_run_command_side_effect)) as mock_run_command:
@@ -450,7 +464,7 @@ class TestLoadMinigraph(object):
                 db = Db()
                 golden_config = {}
                 runner = CliRunner()
-                result = runner.invoke(config.config.commands["load_minigraph"], ["-ty"])
+                result = runner.invoke(config.config.commands["load_minigraph"], ["-ty", "--override_config"])
                 print(result.exit_code)
                 print(result.output)
                 traceback.print_tb(result.exc_info[2])
@@ -545,7 +559,7 @@ class TestReloadConfig(object):
             runner = CliRunner()
 
             result = runner.invoke(config.config.commands["reload"],
-                                    [self.dummy_cfg_file, '-y','-f' ,'-t', 'config_yang'])
+                                    [self.dummy_cfg_file, '-y', '-f', '-t', 'config_yang'])
 
             print(result.exit_code)
             print(result.output)
@@ -667,6 +681,28 @@ class TestConfigQos(object):
         os.environ['UTILITIES_UNIT_TESTING'] = "2"
         import config.main
         importlib.reload(config.main)
+
+    def _keys(args, kwargs):
+        if not TestConfigQos._keys_counter:
+            return []
+        TestConfigQos._keys_counter-=1
+        return ["BUFFER_POOL_TABLE:egress_lossy_pool"]
+
+    def test_qos_wait_until_clear_empty(self):
+        from config.main import _wait_until_clear
+
+        with mock.patch('swsscommon.swsscommon.SonicV2Connector.keys',  side_effect=TestConfigQos._keys):
+            TestConfigQos._keys_counter = 1
+            empty = _wait_until_clear("BUFFER_POOL_TABLE:*", 0.5,2)
+        assert empty
+
+    def test_qos_wait_until_clear_not_empty(self):
+        from config.main import _wait_until_clear
+
+        with mock.patch('swsscommon.swsscommon.SonicV2Connector.keys', side_effect=TestConfigQos._keys):
+            TestConfigQos._keys_counter = 10
+            empty = _wait_until_clear("BUFFER_POOL_TABLE:*", 0.5,2)
+        assert not empty
 
     def test_qos_reload_single(
             self, get_cmd_module, setup_qos_mock_apis,
@@ -1589,7 +1625,7 @@ class TestConfigHostname(object):
         import config.main
         importlib.reload(config.main)
 
-    @mock.patch('config.main.ConfigDBConnector')
+    @mock.patch('config.main.ValidatedConfigDBConnector')
     def test_hostname_add(self, db_conn_patch, get_cmd_module):
         db_conn_patch().mod_entry = mock.Mock()
         (config, show) = get_cmd_module
@@ -1611,6 +1647,266 @@ class TestConfigHostname(object):
         # Check new hostname was part of args
         assert {'hostname': 'new_hostname'} in args
 
+    @patch("validated_config_db_connector.device_info.is_yang_config_validation_enabled", mock.Mock(return_value=True))
+    @patch("config.validated_config_db_connector.ValidatedConfigDBConnector.validated_mod_entry", mock.Mock(side_effect=ValueError))
+    def test_invalid_hostname_add_yang_validation(self):
+        config.ADHOC_VALIDATION = False
+        runner = CliRunner()
+        db = Db()
+        obj = {'db':db.cfgdb}
+
+        result = runner.invoke(config.config.commands["hostname"],
+                               ["invalid_hostname"], obj=obj)
+        assert result.exit_code != 0
+        assert "Failed to write new hostname" in result.output
+
+    @classmethod
+    def teardown_class(cls):
+        print("TEARDOWN")
+
+
+class TestConfigWarmRestart(object):
+    @classmethod
+    def setup_class(cls):
+        print("SETUP")
+        import config.main
+        importlib.reload(config.main)
+
+    @patch("validated_config_db_connector.device_info.is_yang_config_validation_enabled", mock.Mock(return_value=True))
+    @patch("config.validated_config_db_connector.ValidatedConfigDBConnector.validated_mod_entry", mock.Mock(side_effect=ValueError))
+    def test_warm_restart_neighsyncd_timer_yang_validation(self):
+        config.ADHOC_VALIDATION = False
+        runner = CliRunner()
+        db = Db()
+        obj = {'db':db.cfgdb}
+
+        result = runner.invoke(config.config.commands["warm_restart"].commands["neighsyncd_timer"], ["2000"], obj=obj)
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code != 0
+        assert "Invalid ConfigDB. Error" in result.output
+    
+    def test_warm_restart_neighsyncd_timer(self):
+        config.ADHOC_VALIDATION = True
+        runner = CliRunner()
+        db = Db()
+        obj = {'db':db.cfgdb}
+        
+        result = runner.invoke(config.config.commands["warm_restart"].commands["neighsyncd_timer"], ["0"], obj=obj)
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code != 0
+        assert "neighsyncd warm restart timer must be in range 1-9999" in result.output
+    
+    @patch("validated_config_db_connector.device_info.is_yang_config_validation_enabled", mock.Mock(return_value=True))
+    @patch("config.validated_config_db_connector.ValidatedConfigDBConnector.validated_mod_entry", mock.Mock(side_effect=ValueError))
+    def test_warm_restart_bgp_timer_yang_validation(self):
+        config.ADHOC_VALIDATION = False
+        runner = CliRunner()
+        db = Db()
+        obj = {'db':db.cfgdb}
+
+        result = runner.invoke(config.config.commands["warm_restart"].commands["bgp_timer"], ["2000"], obj=obj)
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code != 0
+        assert "Invalid ConfigDB. Error" in result.output
+    
+    def test_warm_restart_bgp_timer(self):
+        config.ADHOC_VALIDATION = True
+        runner = CliRunner()
+        db = Db()
+        obj = {'db':db.cfgdb}
+
+        result = runner.invoke(config.config.commands["warm_restart"].commands["bgp_timer"], ["0"], obj=obj)
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code != 0
+        assert "bgp warm restart timer must be in range 1-3600" in result.output
+    
+    @patch("validated_config_db_connector.device_info.is_yang_config_validation_enabled", mock.Mock(return_value=True))
+    @patch("config.validated_config_db_connector.ValidatedConfigDBConnector.validated_mod_entry", mock.Mock(side_effect=ValueError))
+    def test_warm_restart_teamsyncd_timer_yang_validation(self):
+        config.ADHOC_VALIDATION = False
+        runner = CliRunner()
+        db = Db()
+        obj = {'db':db.cfgdb}
+
+        result = runner.invoke(config.config.commands["warm_restart"].commands["teamsyncd_timer"], ["2000"], obj=obj)
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code != 0
+        assert "Invalid ConfigDB. Error" in result.output
+
+    def test_warm_restart_teamsyncd_timer(self):
+        config.ADHOC_VALIDATION = True
+        runner = CliRunner()
+        db = Db()
+        obj = {'db':db.cfgdb}
+
+        result = runner.invoke(config.config.commands["warm_restart"].commands["teamsyncd_timer"], ["0"], obj=obj)
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code != 0
+        assert "teamsyncd warm restart timer must be in range 1-3600" in result.output
+    
+    @patch("validated_config_db_connector.device_info.is_yang_config_validation_enabled", mock.Mock(return_value=True))
+    @patch("config.validated_config_db_connector.ValidatedConfigDBConnector.validated_mod_entry", mock.Mock(side_effect=ValueError))
+    def test_warm_restart_bgp_eoiu_yang_validation(self):
+        config.ADHOC_VALIDATION = False
+        runner = CliRunner()
+        db = Db()
+        obj = {'db':db.cfgdb}
+
+        result = runner.invoke(config.config.commands["warm_restart"].commands["bgp_eoiu"], ["true"], obj=obj)
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code != 0
+        assert "Invalid ConfigDB. Error" in result.output
+
+    @classmethod
+    def teardown_class(cls):
+        print("TEARDOWN")
+
+
+class TestConfigCableLength(object):
+    @classmethod
+    def setup_class(cls):
+        print("SETUP")
+        import config.main
+        importlib.reload(config.main)
+
+    @patch("config.main.is_dynamic_buffer_enabled", mock.Mock(return_value=True))
+    @patch("config.main.ConfigDBConnector.get_entry", mock.Mock(return_value=False))
+    def test_add_cablelength_with_nonexistent_name_valid_length(self):
+        config.ADHOC_VALIDATION = True
+        runner = CliRunner()
+        db = Db()
+        obj = {'config_db':db.cfgdb}
+
+        result = runner.invoke(config.config.commands["interface"].commands["cable-length"], ["Ethernet0","40m"], obj=obj)
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code != 0
+        assert "Port Ethernet0 doesn't exist" in result.output
+
+    @patch("validated_config_db_connector.device_info.is_yang_config_validation_enabled", mock.Mock(return_value=True))
+    @patch("config.validated_config_db_connector.ValidatedConfigDBConnector.validated_mod_entry", mock.Mock(side_effect=ValueError))
+    @patch("config.main.ConfigDBConnector.get_entry", mock.Mock(return_value="Port Info"))
+    @patch("config.main.is_dynamic_buffer_enabled", mock.Mock(return_value=True))
+    @patch("config.main.ConfigDBConnector.get_keys", mock.Mock(return_value=["sample_key"]))
+    def test_add_cablelength_invalid_yang_validation(self):
+        config.ADHOC_VALIDATION = False
+        runner = CliRunner()
+        db = Db()
+        obj = {'config_db':db.cfgdb}
+
+        result = runner.invoke(config.config.commands["interface"].commands["cable-length"], ["Ethernet0","40"], obj=obj)
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code != 0
+        assert "Invalid ConfigDB. Error" in result.output
+    
+    @patch("config.main.ConfigDBConnector.get_entry", mock.Mock(return_value="Port Info"))
+    @patch("config.main.is_dynamic_buffer_enabled", mock.Mock(return_value=True))
+    def test_add_cablelength_with_invalid_name_invalid_length(self):
+        config.ADHOC_VALIDATION = True
+        runner = CliRunner()
+        db = Db()
+        obj = {'config_db':db.cfgdb}
+
+        result = runner.invoke(config.config.commands["interface"].commands["cable-length"], ["Ethernet0","40x"], obj=obj)
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code != 0
+        assert "Invalid cable length" in result.output
+
+    @classmethod
+    def teardown_class(cls):
+        print("TEARDOWN")
+
+
+class TestConfigLoopback(object):
+    @classmethod
+    def setup_class(cls):
+        print("SETUP")
+        import config.main
+        importlib.reload(config.main)
+    
+    @patch("validated_config_db_connector.device_info.is_yang_config_validation_enabled", mock.Mock(return_value=True))
+    @patch("config.validated_config_db_connector.ValidatedConfigDBConnector.validated_set_entry", mock.Mock(side_effect=ValueError))
+    def test_add_loopback_with_invalid_name_yang_validation(self):
+        config.ADHOC_VALIDATION = False
+        runner = CliRunner()
+        db = Db()
+        obj = {'db':db.cfgdb}
+
+        result = runner.invoke(config.config.commands["loopback"].commands["add"], ["Loopbax1"], obj=obj)
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code != 0
+        assert "Error: Loopbax1 is invalid, name should have prefix 'Loopback' and suffix '<0-999>'" in result.output
+
+    def test_add_loopback_with_invalid_name_adhoc_validation(self):
+        config.ADHOC_VALIDATION = True
+        runner = CliRunner()
+        db = Db()
+        obj = {'db':db.cfgdb}
+
+        result = runner.invoke(config.config.commands["loopback"].commands["add"], ["Loopbax1"], obj=obj)
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code != 0
+        assert "Error: Loopbax1 is invalid, name should have prefix 'Loopback' and suffix '<0-999>'" in result.output
+
+    def test_del_nonexistent_loopback_adhoc_validation(self):
+        config.ADHOC_VALIDATION = True
+        runner = CliRunner()
+        db = Db()
+        obj = {'db':db.cfgdb}
+
+        result = runner.invoke(config.config.commands["loopback"].commands["del"], ["Loopback12"], obj=obj)
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code != 0
+        assert "Loopback12 does not exist" in result.output
+    
+    def test_del_nonexistent_loopback_adhoc_validation(self):
+        config.ADHOC_VALIDATION = True
+        runner = CliRunner()
+        db = Db()
+        obj = {'db':db.cfgdb}
+
+        result = runner.invoke(config.config.commands["loopback"].commands["del"], ["Loopbax1"], obj=obj)
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code != 0
+        assert "Loopbax1 is invalid, name should have prefix 'Loopback' and suffix '<0-999>'" in result.output
+    
+    @patch("config.validated_config_db_connector.ValidatedConfigDBConnector.validated_set_entry", mock.Mock(return_value=True))
+    @patch("validated_config_db_connector.device_info.is_yang_config_validation_enabled", mock.Mock(return_value=True))
+    def test_add_loopback_yang_validation(self):
+        config.ADHOC_VALIDATION = False
+        runner = CliRunner()
+        db = Db()
+        obj = {'db':db.cfgdb}
+
+        result = runner.invoke(config.config.commands["loopback"].commands["add"], ["Loopback12"], obj=obj)
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code == 0
+
+    def test_add_loopback_adhoc_validation(self):
+        config.ADHOC_VALIDATION = True
+        runner = CliRunner()
+        db = Db()
+        obj = {'db':db.cfgdb}
+
+        result = runner.invoke(config.config.commands["loopback"].commands["add"], ["Loopback12"], obj=obj)
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code == 0
+    
     @classmethod
     def teardown_class(cls):
         print("TEARDOWN")

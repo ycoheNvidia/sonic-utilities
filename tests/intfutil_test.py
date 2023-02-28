@@ -101,15 +101,15 @@ show_interface_link_training_status_output = """\
   Interface      LT Oper    LT Admin    Oper    Admin
 -----------  -----------  ----------  ------  -------
   Ethernet0  not trained          on    down       up
- Ethernet16          off           -      up       up
- Ethernet24          off           -      up       up
- Ethernet28          off           -      up       up
+ Ethernet16          N/A         N/A      up       up
+ Ethernet24          N/A         N/A      up       up
+ Ethernet28          N/A         N/A      up       up
  Ethernet32      trained          on      up       up
- Ethernet36          off           -      up       up
+ Ethernet36          N/A         N/A      up       up
 Ethernet112          off         off      up       up
-Ethernet116          off           -      up       up
-Ethernet120          off           -      up       up
-Ethernet124          off           -      up       up
+Ethernet116          N/A         N/A      up       up
+Ethernet120          N/A         N/A      up       up
+Ethernet124          N/A         N/A      up       up
 """
 
 class TestIntfutil(TestCase):
@@ -209,8 +209,9 @@ class TestIntfutil(TestCase):
         expected_output = (
             "Sub port interface    Speed    MTU    Vlan    Admin                  Type\n"
           "--------------------  -------  -----  ------  -------  --------------------\n"
-          "            Eth32.10      40G   9100     100       up  802.1q-encapsulation\n"
-          "        Ethernet0.10      25G   9100      10       up  802.1q-encapsulation"
+          "            Eth36.10      10M   9100     100       up  802.1q-encapsulation\n"
+          "        Ethernet0.10      25G   9100      10       up  802.1q-encapsulation\n"
+          "           Po0001.10      40G   9100     100       up  802.1q-encapsulation"
         )
         self.assertEqual(result.output.strip(), expected_output)
 
@@ -247,10 +248,20 @@ class TestIntfutil(TestCase):
         expected_output = (
             "Sub port interface    Speed    MTU    Vlan    Admin                  Type\n"
           "--------------------  -------  -----  ------  -------  --------------------\n"
-          "            Eth32.10      40G   9100     100       up  802.1q-encapsulation"
+          "            Eth36.10      10M   9100     100       up  802.1q-encapsulation"
         )
-        # Test 'intfutil status Eth32.10'
-        output = subprocess.check_output('intfutil -c status -i Eth32.10', stderr=subprocess.STDOUT, shell=True, text=True)
+        # Test 'intfutil status Eth36.10'
+        output = subprocess.check_output('intfutil -c status -i Eth36.10', stderr=subprocess.STDOUT, shell=True, text=True)
+        print(output, file=sys.stderr)
+        self.assertEqual(output.strip(), expected_output)
+
+        expected_output = (
+            "Sub port interface    Speed    MTU    Vlan    Admin                  Type\n"
+          "--------------------  -------  -----  ------  -------  --------------------\n"
+          "           Po0001.10      40G   9100     100       up  802.1q-encapsulation"
+        )
+        # Test 'intfutil status Po0001.10'
+        output = subprocess.check_output('intfutil -c status -i Po0001.10', stderr=subprocess.STDOUT, shell=True, text=True)
         print(output, file=sys.stderr)
         self.assertEqual(output.strip(), expected_output)
 
@@ -261,9 +272,14 @@ class TestIntfutil(TestCase):
         expected_output = "Command: intfutil -c status -i Ethernet0.10"
         self.assertEqual(result.output.split('\n')[0], expected_output)
 
-        result = self.runner.invoke(show.cli.commands["subinterfaces"].commands["status"], ["Eth32.10", "--verbose"])
+        result = self.runner.invoke(show.cli.commands["subinterfaces"].commands["status"], ["Eth36.10", "--verbose"])
         print(result.output, file=sys.stderr)
-        expected_output = "Command: intfutil -c status -i Eth32.10"
+        expected_output = "Command: intfutil -c status -i Eth36.10"
+        self.assertEqual(result.output.split('\n')[0], expected_output)
+
+        result = self.runner.invoke(show.cli.commands["subinterfaces"].commands["status"], ["Po0001.10", "--verbose"])
+        print(result.output, file=sys.stderr)
+        expected_output = "Command: intfutil -c status -i Po0001.10"
         self.assertEqual(result.output.split('\n')[0], expected_output)
 
     # Test status of single sub interface in alias naming mode

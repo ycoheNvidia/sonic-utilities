@@ -6,7 +6,7 @@
 #
 #####################################################################
 
-import _pickle as pickle
+import json
 import argparse
 import datetime
 import os.path
@@ -15,6 +15,7 @@ import sys
 from collections import namedtuple, OrderedDict
 from natsort import natsorted
 from tabulate import tabulate
+from sonic_py_common import multi_asic
 
 # mock the redis for unit test purposes #
 try:
@@ -24,12 +25,17 @@ try:
         sys.path.insert(0, modules_path)
         sys.path.insert(0, tests_path)
         import mock_tables.dbconnector # lgtm [py/unused-import]
+    if os.environ["UTILITIES_UNIT_TESTING_TOPOLOGY"] == "multi_asic":
+        import mock_tables.mock_multi_asic
+        mock_tables.dbconnector.load_namespace_config()
 
 except KeyError:
     pass
 
 from swsscommon.swsscommon import SonicV2Connector
-from utilities_common.cli import UserCache
+from utilities_common.cli import json_serial, UserCache
+from utilities_common import constants
+import utilities_common.multi_asic as multi_asic_util
 
 QueueStats = namedtuple("QueueStats", "queueindex, queuetype, totalpacket, totalbytes, droppacket, dropbytes")
 header = ['Port', 'TxQ', 'Counter/pkts', 'Counter/bytes', 'Drop/pkts', 'Drop/bytes']
@@ -85,9 +91,15 @@ def build_json(port, cnstat):
 
 
 class Queuestat(object):
-    def __init__(self, voq=False):
-        self.db = SonicV2Connector(use_unix_socket_path=False)
-        self.db.connect(self.db.COUNTERS_DB)
+    def __init__(self, namespace, voq=False):
+        self.db = None
+        self.multi_asic = multi_asic_util.MultiAsic(constants.DISPLAY_ALL, namespace)
+        if namespace is not None:
+            for ns in self.multi_asic.get_ns_list_based_on_options():
+                self.db = multi_asic.connect_to_all_dbs_for_ns(ns)
+        else:
+            self.db = SonicV2Connector(use_unix_socket_path=False)
+            self.db.connect(self.db.COUNTERS_DB)
         self.voq = voq
 
         def get_queue_port(table_id):
@@ -174,7 +186,7 @@ class Queuestat(object):
                     fields[pos] = STATUS_NA
                 elif fields[pos] != STATUS_NA:
                     fields[pos] = str(int(counter_data))
-            cntr = QueueStats._make(fields)
+            cntr = QueueStats._make(fields)._asdict()
             return cntr
 
        # Build a dictionary of the stats
@@ -199,9 +211,9 @@ class Queuestat(object):
                 if json_opt:
                     json_output[port][key] = data
                 continue
-            table.append((port, data.queuetype + str(data.queueindex),
-                        data.totalpacket, data.totalbytes,
-                        data.droppacket, data.dropbytes))
+            table.append((port, data['queuetype'] + str(data['queueindex']),
+                        data['totalpacket'], data['totalbytes'],
+                        data['droppacket'], data['dropbytes']))
 
         if json_opt:
             json_output[port].update(build_json(port, table))
@@ -229,15 +241,15 @@ class Queuestat(object):
                 old_cntr = cnstat_old_dict.get(key)
 
             if old_cntr is not None:
-                table.append((port, cntr.queuetype + str(cntr.queueindex),
-                            ns_diff(cntr.totalpacket, old_cntr.totalpacket),
-                            ns_diff(cntr.totalbytes, old_cntr.totalbytes),
-                            ns_diff(cntr.droppacket, old_cntr.droppacket),
-                            ns_diff(cntr.dropbytes, old_cntr.dropbytes)))
+                table.append((port, cntr['queuetype'] + str(cntr['queueindex']),
+                            ns_diff(cntr['totalpacket'], old_cntr['totalpacket']),
+                            ns_diff(cntr['totalbytes'], old_cntr['totalbytes']),
+                            ns_diff(cntr['droppacket'], old_cntr['droppacket']),
+                            ns_diff(cntr['dropbytes'], old_cntr['dropbytes'])))
             else:
-                table.append((port, cntr.queuetype + str(cntr.queueindex),
-                        cntr.totalpacket, cntr.totalbytes,
-                        cntr.droppacket, cntr.dropbytes))
+                table.append((port, cntr['queuetype'] + str(cntr['queueindex']),
+                        cntr['totalpacket'], cntr['totalbytes'],
+                        cntr['droppacket'], cntr['dropbytes']))
 
         if json_opt:
             json_output[port].update(build_json(port, table))
@@ -261,7 +273,7 @@ class Queuestat(object):
             cnstat_fqn_file_name = cnstat_fqn_file + port
             if os.path.isfile(cnstat_fqn_file_name):
                 try:
-                    cnstat_cached_dict = pickle.load(open(cnstat_fqn_file_name, 'rb'))
+                    cnstat_cached_dict = json.load(open(cnstat_fqn_file_name, 'r'))
                     if json_opt:
                         json_output[port].update({"cached_time":cnstat_cached_dict.get('time')})
                         json_output.update(self.cnstat_diff_print(port, cnstat_dict, cnstat_cached_dict, json_opt))
@@ -295,7 +307,7 @@ class Queuestat(object):
         json_output[port] = {}
         if os.path.isfile(cnstat_fqn_file_name):
             try:
-                cnstat_cached_dict = pickle.load(open(cnstat_fqn_file_name, 'rb'))
+                cnstat_cached_dict = json.load(open(cnstat_fqn_file_name, 'r'))
                 if json_opt:
                     json_output[port].update({"cached_time":cnstat_cached_dict.get('time')})
                     json_output.update(self.cnstat_diff_print(port, cnstat_dict, cnstat_cached_dict, json_opt))
@@ -318,7 +330,7 @@ class Queuestat(object):
         for port in natsorted(self.counter_port_name_map):
             cnstat_dict = self.get_cnstat(self.port_queues_map[port])
             try:
-                pickle.dump(cnstat_dict, open(cnstat_fqn_file + port, 'wb'))
+                json.dump(cnstat_dict, open(cnstat_fqn_file + port, 'w'), default=json_serial)
             except IOError as e:
                 print(e.errno, e)
                 sys.exit(e.errno)
@@ -345,12 +357,14 @@ Examples:
     parser.add_argument('-v', '--version', action='version', version='%(prog)s 1.0')
     parser.add_argument('-j', '--json_opt', action='store_true', help='Print in JSON format')
     parser.add_argument('-V', '--voq', action='store_true', help='display voq stats')
+    parser.add_argument('-n','--namespace', default=None, help='Display queue counters for specific namespace')
     args = parser.parse_args()
 
     save_fresh_stats = args.clear
     delete_stats = args.delete
     voq = args.voq
     json_opt = args.json_opt
+    namespace = args.namespace
 
     port_to_show_stats = args.port
 
@@ -362,7 +376,7 @@ Examples:
     if delete_stats:
         cache.remove()
 
-    queuestat = Queuestat( voq )
+    queuestat = Queuestat( namespace, voq )
 
     if save_fresh_stats:
         queuestat.save_fresh_stats()

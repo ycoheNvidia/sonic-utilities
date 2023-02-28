@@ -1,8 +1,13 @@
 import click
 import utilities_common.cli as clicommon
+import utilities_common.dhcp_relay_util as dhcp_relay_util
 
+from jsonpatch import JsonPatchConflict
 from time import sleep
 from .utils import log
+from .validated_config_db_connector import ValidatedConfigDBConnector
+
+ADHOC_VALIDATION = True
 
 #
 # 'vlan' group ('config vlan ...')
@@ -12,6 +17,11 @@ def vlan():
     """VLAN-related configuration tasks"""
     pass
 
+
+def set_dhcp_relay_table(table, config_db, vlan_name, value):
+    config_db.set_entry(table, vlan_name, value)
+
+
 @vlan.command('add')
 @click.argument('vid', metavar='<vid>', required=True, type=int)
 @clicommon.pass_db
@@ -19,19 +29,28 @@ def add_vlan(db, vid):
     """Add VLAN"""
 
     ctx = click.get_current_context()
-
-    if not clicommon.is_vlanid_in_range(vid):
-        ctx.fail("Invalid VLAN ID {} (1-4094)".format(vid))
-
     vlan = 'Vlan{}'.format(vid)
-    
-    if vid == 1:
-        ctx.fail("{} is default VLAN".format(vlan))
-    
-    if clicommon.check_if_vlanid_exist(db.cfgdb, vlan):
-        ctx.fail("{} already exists".format(vlan))
 
-    db.cfgdb.set_entry('VLAN', vlan, {'vlanid': vid})
+    config_db = ValidatedConfigDBConnector(db.cfgdb)
+    if ADHOC_VALIDATION:
+        if not clicommon.is_vlanid_in_range(vid):
+            ctx.fail("Invalid VLAN ID {} (1-4094)".format(vid))
+
+        if vid == 1:
+            ctx.fail("{} is default VLAN".format(vlan)) # TODO: MISSING CONSTRAINT IN YANG MODEL
+
+        if clicommon.check_if_vlanid_exist(db.cfgdb, vlan): # TODO: MISSING CONSTRAINT IN YANG MODEL
+            ctx.fail("{} already exists".format(vlan))
+        if clicommon.check_if_vlanid_exist(db.cfgdb, vlan, "DHCP_RELAY"):
+            ctx.fail("DHCPv6 relay config for {} already exists".format(vlan))
+    # set dhcpv4_relay table
+    set_dhcp_relay_table('VLAN', config_db, vlan, {'vlanid': str(vid)})
+
+    # set dhcpv6_relay table
+    set_dhcp_relay_table('DHCP_RELAY', config_db, vlan, None)
+    # We need to restart dhcp_relay service after dhcpv6_relay config change
+    dhcp_relay_util.handle_restart_dhcp_relay_service()
+
 
 @vlan.command('del')
 @click.argument('vid', metavar='<vid>', required=True, type=int)
@@ -42,26 +61,40 @@ def del_vlan(db, vid):
     log.log_info("'vlan del {}' executing...".format(vid))
 
     ctx = click.get_current_context()
-
-    if not clicommon.is_vlanid_in_range(vid):
-        ctx.fail("Invalid VLAN ID {} (1-4094)".format(vid))
-
     vlan = 'Vlan{}'.format(vid)
-    if clicommon.check_if_vlanid_exist(db.cfgdb, vlan) == False:
-        ctx.fail("{} does not exist".format(vlan))
 
-    intf_table = db.cfgdb.get_table('VLAN_INTERFACE')
-    for intf_key in intf_table:
-        if ((type(intf_key) is str and intf_key == 'Vlan{}'.format(vid)) or
-            (type(intf_key) is tuple and intf_key[0] == 'Vlan{}'.format(vid))):
-            ctx.fail("{} can not be removed. First remove IP addresses assigned to this VLAN".format(vlan))
+    config_db = ValidatedConfigDBConnector(db.cfgdb)
+    if ADHOC_VALIDATION:
+        if not clicommon.is_vlanid_in_range(vid):
+            ctx.fail("Invalid VLAN ID {} (1-4094)".format(vid))
 
-    keys = [ (k, v) for k, v in db.cfgdb.get_table('VLAN_MEMBER') if k == 'Vlan{}'.format(vid) ]
-    
-    if keys:
-        ctx.fail("VLAN ID {} can not be removed. First remove all members assigned to this VLAN.".format(vid))
-        
-    db.cfgdb.set_entry('VLAN', 'Vlan{}'.format(vid), None)
+        if clicommon.check_if_vlanid_exist(db.cfgdb, vlan) == False:
+            ctx.fail("{} does not exist".format(vlan))
+
+        intf_table = db.cfgdb.get_table('VLAN_INTERFACE')
+        for intf_key in intf_table:
+            if ((type(intf_key) is str and intf_key == 'Vlan{}'.format(vid)) or # TODO: MISSING CONSTRAINT IN YANG MODEL
+                (type(intf_key) is tuple and intf_key[0] == 'Vlan{}'.format(vid))):
+                ctx.fail("{} can not be removed. First remove IP addresses assigned to this VLAN".format(vlan))
+
+        keys = [ (k, v) for k, v in db.cfgdb.get_table('VLAN_MEMBER') if k == 'Vlan{}'.format(vid) ]
+
+        if keys: # TODO: MISSING CONSTRAINT IN YANG MODEL
+            ctx.fail("VLAN ID {} can not be removed. First remove all members assigned to this VLAN.".format(vid))
+
+        vxlan_table = db.cfgdb.get_table('VXLAN_TUNNEL_MAP')
+        for vxmap_key, vxmap_data in vxlan_table.items():
+            if vxmap_data['vlan'] == 'Vlan{}'.format(vid):
+                ctx.fail("vlan: {} can not be removed. First remove vxlan mapping '{}' assigned to VLAN".format(vid, '|'.join(vxmap_key)) )
+
+    # set dhcpv4_relay table
+    set_dhcp_relay_table('VLAN', config_db, vlan, None)
+
+    # set dhcpv6_relay table
+    set_dhcp_relay_table('DHCP_RELAY', config_db, vlan, None)
+    # We need to restart dhcp_relay service after dhcpv6_relay config change
+    dhcp_relay_util.handle_restart_dhcp_relay_service()
+
 
 def restart_ndppd():
     verify_swss_running_cmd = "docker container inspect -f '{{.State.Status}}' swss"
@@ -69,7 +102,7 @@ def restart_ndppd():
     ndppd_config_gen_cmd = "sonic-cfggen -d -t /usr/share/sonic/templates/ndppd.conf.j2,/etc/ndppd.conf"
     ndppd_restart_cmd = "supervisorctl restart ndppd"
 
-    output = clicommon.run_command(verify_swss_running_cmd, return_cmd=True)
+    output, _ = clicommon.run_command(verify_swss_running_cmd, return_cmd=True)
 
     if output and output.strip() != "running":
         click.echo(click.style('SWSS container is not running, changes will take effect the next time the SWSS container starts', fg='red'),)
@@ -118,46 +151,52 @@ def add_vlan_member(db, vid, port, untagged):
 
     log.log_info("'vlan member add {} {}' executing...".format(vid, port))
 
-    if not clicommon.is_vlanid_in_range(vid):
-        ctx.fail("Invalid VLAN ID {} (1-4094)".format(vid))
-
     vlan = 'Vlan{}'.format(vid)
-    if clicommon.check_if_vlanid_exist(db.cfgdb, vlan) == False:
-        ctx.fail("{} does not exist".format(vlan))
+    
+    config_db = ValidatedConfigDBConnector(db.cfgdb)
+    if ADHOC_VALIDATION:
+        if not clicommon.is_vlanid_in_range(vid):
+            ctx.fail("Invalid VLAN ID {} (1-4094)".format(vid))
 
-    if clicommon.get_interface_naming_mode() == "alias":
-        alias = port
-        iface_alias_converter = clicommon.InterfaceAliasConverter(db)
-        port = iface_alias_converter.alias_to_name(alias)
-        if port is None:
-            ctx.fail("cannot find port name for alias {}".format(alias))
+        if clicommon.check_if_vlanid_exist(db.cfgdb, vlan) == False:
+            ctx.fail("{} does not exist".format(vlan))
 
-    if clicommon.is_port_mirror_dst_port(db.cfgdb, port):
-        ctx.fail("{} is configured as mirror destination port".format(port))
+        if clicommon.get_interface_naming_mode() == "alias": # TODO: MISSING CONSTRAINT IN YANG MODEL
+            alias = port
+            iface_alias_converter = clicommon.InterfaceAliasConverter(db)
+            port = iface_alias_converter.alias_to_name(alias)
+            if port is None:
+                ctx.fail("cannot find port name for alias {}".format(alias))
 
-    if clicommon.is_port_vlan_member(db.cfgdb, port, vlan):
-        ctx.fail("{} is already a member of {}".format(port, vlan))
+        if clicommon.is_port_mirror_dst_port(db.cfgdb, port): # TODO: MISSING CONSTRAINT IN YANG MODEL
+            ctx.fail("{} is configured as mirror destination port".format(port))
 
-    if clicommon.is_valid_port(db.cfgdb, port):
-        is_port = True
-    elif clicommon.is_valid_portchannel(db.cfgdb, port):
-        is_port = False
-    else:
-        ctx.fail("{} does not exist".format(port))
+        if clicommon.is_port_vlan_member(db.cfgdb, port, vlan): # TODO: MISSING CONSTRAINT IN YANG MODEL
+            ctx.fail("{} is already a member of {}".format(port, vlan))
 
-    if (is_port and clicommon.is_port_router_interface(db.cfgdb, port)) or \
-       (not is_port and clicommon.is_pc_router_interface(db.cfgdb, port)):
-        ctx.fail("{} is a router interface!".format(port))
+        if clicommon.is_valid_port(db.cfgdb, port):
+            is_port = True
+        elif clicommon.is_valid_portchannel(db.cfgdb, port):
+            is_port = False
+        else:
+            ctx.fail("{} does not exist".format(port))
+
+        if (is_port and clicommon.is_port_router_interface(db.cfgdb, port)) or \
+           (not is_port and clicommon.is_pc_router_interface(db.cfgdb, port)): # TODO: MISSING CONSTRAINT IN YANG MODEL
+            ctx.fail("{} is a router interface!".format(port))
         
-    portchannel_member_table = db.cfgdb.get_table('PORTCHANNEL_MEMBER')
+        portchannel_member_table = db.cfgdb.get_table('PORTCHANNEL_MEMBER')
 
-    if (is_port and clicommon.interface_is_in_portchannel(portchannel_member_table, port)):
-        ctx.fail("{} is part of portchannel!".format(port))
+        if (is_port and clicommon.interface_is_in_portchannel(portchannel_member_table, port)): # TODO: MISSING CONSTRAINT IN YANG MODEL
+            ctx.fail("{} is part of portchannel!".format(port))
 
-    if (clicommon.interface_is_untagged_member(db.cfgdb, port) and untagged):
-        ctx.fail("{} is already untagged member!".format(port))
+        if (clicommon.interface_is_untagged_member(db.cfgdb, port) and untagged): # TODO: MISSING CONSTRAINT IN YANG MODEL
+            ctx.fail("{} is already untagged member!".format(port))
 
-    db.cfgdb.set_entry('VLAN_MEMBER', (vlan, port), {'tagging_mode': "untagged" if untagged else "tagged" })
+    try:
+        config_db.set_entry('VLAN_MEMBER', (vlan, port), {'tagging_mode': "untagged" if untagged else "tagged" })
+    except ValueError:
+        ctx.fail("{} invalid or does not exist, or {} invalid or does not exist".format(vlan, port))
 
 @vlan_member.command('del')
 @click.argument('vid', metavar='<vid>', required=True, type=int)
@@ -167,25 +206,29 @@ def del_vlan_member(db, vid, port):
     """Delete VLAN member"""
 
     ctx = click.get_current_context()
-
     log.log_info("'vlan member del {} {}' executing...".format(vid, port))
-
-    if not clicommon.is_vlanid_in_range(vid):
-        ctx.fail("Invalid VLAN ID {} (1-4094)".format(vid))
-
     vlan = 'Vlan{}'.format(vid)
-    if clicommon.check_if_vlanid_exist(db.cfgdb, vlan) == False:
-        ctx.fail("{} does not exist".format(vlan))
+    
+    config_db = ValidatedConfigDBConnector(db.cfgdb)
+    if ADHOC_VALIDATION:
+        if not clicommon.is_vlanid_in_range(vid):
+            ctx.fail("Invalid VLAN ID {} (1-4094)".format(vid))
 
-    if clicommon.get_interface_naming_mode() == "alias":
-        alias = port
-        iface_alias_converter = clicommon.InterfaceAliasConverter(db)
-        port = iface_alias_converter.alias_to_name(alias)
-        if port is None:
-            ctx.fail("cannot find port name for alias {}".format(alias))
+        if clicommon.check_if_vlanid_exist(db.cfgdb, vlan) == False:
+            ctx.fail("{} does not exist".format(vlan))
 
-    if not clicommon.is_port_vlan_member(db.cfgdb, port, vlan):
-        ctx.fail("{} is not a member of {}".format(port, vlan))
+        if clicommon.get_interface_naming_mode() == "alias": # TODO: MISSING CONSTRAINT IN YANG MODEL
+            alias = port
+            iface_alias_converter = clicommon.InterfaceAliasConverter(db)
+            port = iface_alias_converter.alias_to_name(alias)
+            if port is None:
+                ctx.fail("cannot find port name for alias {}".format(alias))
 
-    db.cfgdb.set_entry('VLAN_MEMBER', (vlan, port), None)
+        if not clicommon.is_port_vlan_member(db.cfgdb, port, vlan): # TODO: MISSING CONSTRAINT IN YANG MODEL
+            ctx.fail("{} is not a member of {}".format(port, vlan))
+
+    try:
+        config_db.set_entry('VLAN_MEMBER', (vlan, port), None)
+    except JsonPatchConflict:
+        ctx.fail("{} invalid or does not exist, or {} is not a member of {}".format(vlan, port, vlan))
 
