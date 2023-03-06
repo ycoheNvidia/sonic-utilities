@@ -1,5 +1,6 @@
 import click
 import utilities_common.cli as clicommon
+import utilities_common.dhcp_relay_util as dhcp_relay_util
 
 from jsonpatch import JsonPatchConflict
 from time import sleep
@@ -7,6 +8,8 @@ from .utils import log
 from .validated_config_db_connector import ValidatedConfigDBConnector
 
 ADHOC_VALIDATION = True
+DHCP_RELAY_TABLE = "DHCP_RELAY"
+DHCPV6_SERVERS = "dhcpv6_servers"
 
 #
 # 'vlan' group ('config vlan ...')
@@ -16,6 +19,16 @@ def vlan():
     """VLAN-related configuration tasks"""
     pass
 
+
+def set_dhcp_relay_table(table, config_db, vlan_name, value):
+    config_db.set_entry(table, vlan_name, value)
+
+
+def is_dhcp_relay_running():
+    out, _ = clicommon.run_command("systemctl show dhcp_relay.service --property ActiveState --value", return_cmd=True)
+    return out.strip() == "active"
+
+
 @vlan.command('add')
 @click.argument('vid', metavar='<vid>', required=True, type=int)
 @clicommon.pass_db
@@ -24,7 +37,7 @@ def add_vlan(db, vid):
 
     ctx = click.get_current_context()
     vlan = 'Vlan{}'.format(vid)
-    
+
     config_db = ValidatedConfigDBConnector(db.cfgdb)
     if ADHOC_VALIDATION:
         if not clicommon.is_vlanid_in_range(vid):
@@ -32,25 +45,42 @@ def add_vlan(db, vid):
 
         if vid == 1:
             ctx.fail("{} is default VLAN".format(vlan)) # TODO: MISSING CONSTRAINT IN YANG MODEL
-    
+
         if clicommon.check_if_vlanid_exist(db.cfgdb, vlan): # TODO: MISSING CONSTRAINT IN YANG MODEL
             ctx.fail("{} already exists".format(vlan))
-    
-    try:
-        config_db.set_entry('VLAN', vlan, {'vlanid': str(vid)})
-    except ValueError:
-        ctx.fail("Invalid VLAN ID {} (1-4094)".format(vid))
+        if clicommon.check_if_vlanid_exist(db.cfgdb, vlan, "DHCP_RELAY"):
+            ctx.fail("DHCPv6 relay config for {} already exists".format(vlan))
+    # set dhcpv4_relay table
+    set_dhcp_relay_table('VLAN', config_db, vlan, {'vlanid': str(vid)})
+
+
+def is_dhcpv6_relay_config_exist(db, vlan_name):
+    keys = db.cfgdb.get_keys(DHCP_RELAY_TABLE)
+    if len(keys) == 0 or vlan_name not in keys:
+        return False
+
+    table = db.cfgdb.get_entry("DHCP_RELAY", vlan_name)
+    dhcpv6_servers = table.get(DHCPV6_SERVERS, [])
+    if len(dhcpv6_servers) > 0:
+        return True
+
 
 @vlan.command('del')
 @click.argument('vid', metavar='<vid>', required=True, type=int)
+@click.option('--no_restart_dhcp_relay', is_flag=True, type=click.BOOL, required=False, default=False,
+              help="If no_restart_dhcp_relay is True, do not restart dhcp_relay while del vlan and \
+                  require dhcpv6 relay of this is empty")
 @clicommon.pass_db
-def del_vlan(db, vid):
+def del_vlan(db, vid, no_restart_dhcp_relay):
     """Delete VLAN"""
 
     log.log_info("'vlan del {}' executing...".format(vid))
 
     ctx = click.get_current_context()
     vlan = 'Vlan{}'.format(vid)
+    if no_restart_dhcp_relay:
+        if is_dhcpv6_relay_config_exist(db, vlan):
+            ctx.fail("Can't delete {} because related DHCPv6 Relay config is exist".format(vlan))
 
     config_db = ValidatedConfigDBConnector(db.cfgdb)
     if ADHOC_VALIDATION:
@@ -67,19 +97,25 @@ def del_vlan(db, vid):
                 ctx.fail("{} can not be removed. First remove IP addresses assigned to this VLAN".format(vlan))
 
         keys = [ (k, v) for k, v in db.cfgdb.get_table('VLAN_MEMBER') if k == 'Vlan{}'.format(vid) ]
-    
+
         if keys: # TODO: MISSING CONSTRAINT IN YANG MODEL
             ctx.fail("VLAN ID {} can not be removed. First remove all members assigned to this VLAN.".format(vid))
-        
+
         vxlan_table = db.cfgdb.get_table('VXLAN_TUNNEL_MAP')
         for vxmap_key, vxmap_data in vxlan_table.items():
             if vxmap_data['vlan'] == 'Vlan{}'.format(vid):
                 ctx.fail("vlan: {} can not be removed. First remove vxlan mapping '{}' assigned to VLAN".format(vid, '|'.join(vxmap_key)) )
-    
-    try: 
-        config_db.set_entry('VLAN', 'Vlan{}'.format(vid), None)
-    except JsonPatchConflict:
-        ctx.fail("{} does not exist".format(vlan))
+
+    # set dhcpv4_relay table
+    set_dhcp_relay_table('VLAN', config_db, vlan, None)
+
+    if not no_restart_dhcp_relay and is_dhcpv6_relay_config_exist(db, vlan):
+        # set dhcpv6_relay table
+        set_dhcp_relay_table('DHCP_RELAY', config_db, vlan, None)
+        # We need to restart dhcp_relay service after dhcpv6_relay config change
+        if is_dhcp_relay_running():
+            dhcp_relay_util.handle_restart_dhcp_relay_service()
+
 
 def restart_ndppd():
     verify_swss_running_cmd = "docker container inspect -f '{{.State.Status}}' swss"

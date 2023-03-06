@@ -579,6 +579,23 @@ class DBMigrator():
             self.configDB.set_entry('PORT_QOS_MAP', 'global', {"dscp_to_tc_map": dscp_to_tc_map_table_names[0]})
             log.log_info("Created entry for global DSCP_TO_TC_MAP {}".format(dscp_to_tc_map_table_names[0]))
 
+    def migrate_route_table(self):
+        """
+        Handle route table migration. Migrations handled:
+        1. 'weight' attr in ROUTE object was introduced 202205 onwards.
+            Upgrade from older branch to 202205 will require this 'weight' attr to be added explicitly
+        """
+        route_table = self.appDB.get_table("ROUTE_TABLE")
+        for route_prefix, route_attr in route_table.items():
+            if 'weight' not in route_attr:
+                if type(route_prefix) == tuple:
+                    # IPv6 route_prefix is returned from db as tuple
+                    route_key = "ROUTE_TABLE:" + ":".join(route_prefix)
+                else:
+                    # IPv4 route_prefix is returned from db as str
+                    route_key = "ROUTE_TABLE:{}".format(route_prefix)
+                self.appDB.set(self.appDB.APPL_DB, route_key, 'weight','')
+
     def version_unknown(self):
         """
         version_unknown tracks all SONiC versions that doesn't have a version
@@ -822,14 +839,18 @@ class DBMigrator():
             keys = self.loglevelDB.keys(self.loglevelDB.LOGLEVEL_DB, "*")
             if keys is not None:
                 for key in keys:
-                    if key != "JINJA2_CACHE":
-                        fvs = self.loglevelDB.get_all(self.loglevelDB.LOGLEVEL_DB, key)
-                        component = key.split(":")[1]
-                        loglevel = fvs[loglevel_field]
-                        logoutput = fvs[logoutput_field]
-                        self.configDB.set(self.configDB.CONFIG_DB, '{}|{}'.format(table_name, component), loglevel_field, loglevel)
-                        self.configDB.set(self.configDB.CONFIG_DB, '{}|{}'.format(table_name, component), logoutput_field, logoutput)
-                    self.loglevelDB.delete(self.loglevelDB.LOGLEVEL_DB, key)
+                    try:
+                        if key != "JINJA2_CACHE":
+                            fvs = self.loglevelDB.get_all(self.loglevelDB.LOGLEVEL_DB, key)
+                            component = key.split(":")[1]
+                            loglevel = fvs[loglevel_field]
+                            logoutput = fvs[logoutput_field]
+                            self.configDB.set(self.configDB.CONFIG_DB, '{}|{}'.format(table_name, component), loglevel_field, loglevel)
+                            self.configDB.set(self.configDB.CONFIG_DB, '{}|{}'.format(table_name, component), logoutput_field, logoutput)
+                    except Exception as err:
+                        log.log_warning('Error occured during LOGLEVEL_DB migration for {}. Ignoring key {}'.format(err, key))
+                    finally:
+                        self.loglevelDB.delete(self.loglevelDB.LOGLEVEL_DB, key)
         self.set_version('version_3_0_6')
         return 'version_3_0_6'
 
@@ -894,6 +915,8 @@ class DBMigrator():
             self.migrate_mgmt_ports_on_s6100()
         else:
             log.log_notice("Asic Type: {}, Hwsku: {}".format(self.asic_type, self.hwsku))
+
+        self.migrate_route_table()
 
     def migrate(self):
         version = self.get_version()
