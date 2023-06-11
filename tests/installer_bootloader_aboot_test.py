@@ -76,5 +76,10 @@ def test_set_fips_aboot():
 
 def test_verify_image_sign():
     bootloader = aboot.AbootBootloader()
-
-    assert bootloader.verify_image_sign(exp_image) == True
+    return_value = None
+    try:
+        return_value = bootloader.verify_image_sign(exp_image)
+    except NotImplementedError:
+        pass
+    else:
+        assert False, "Wrong return value from verify_image_sign, returned" + str(return_value)

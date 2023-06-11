@@ -579,12 +579,14 @@ def install(url, force, skip_platform_check=False, skip_migration=False, skip_pa
 
         # Calling verification script by default - signature will be checked if enabled in bios
         echo_and_log("Verifing image {} signature...".format(binary_image_version))
-        if not bootloader.verify_image_sign(image_path):
-            echo_and_log('Error: Failed verify image signature', LOG_ERR)
-            raise click.Abort()
-        else:
-            echo_and_log('Verification successful')
-
+        try:
+            if not bootloader.verify_image_sign(image_path):
+                echo_and_log('Error: Failed verify image signature', LOG_ERR)
+                raise click.Abort()
+            else:
+                echo_and_log('Verification successful')
+        except NotImplementedError:
+            echo_and_log('Image verification not impelmented, continue image install without it')
         echo_and_log("Installing image {} and setting it as default...".format(binary_image_version))
         with SWAPAllocator(not skip_setup_swap, swap_mem_size, total_mem_threshold, available_mem_threshold):
             bootloader.install_image(image_path)

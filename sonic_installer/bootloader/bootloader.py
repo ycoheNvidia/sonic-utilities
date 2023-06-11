@@ -77,7 +77,7 @@ class Bootloader(object):
 
     def verify_image_sign(self, image_path):
         """verify image signature is valid"""
-        return True
+        raise NotImplementedError
 
     @classmethod
     def detect(cls):

@@ -18,4 +18,10 @@ def test_get_current_image(re_search):
 
 def test_verify_image_sign():
     bootloader = onie.OnieInstallerBootloader()
-    assert bootloader.verify_image_sign('some_path.path') == True
+    return_value = None
+    try:
+        return_value = bootloader.verify_image_sign('some_path.path')
+    except NotImplementedError:
+        pass
+    else:
+        assert False, "Wrong return value from verify_image_sign, returned" + str(return_value)

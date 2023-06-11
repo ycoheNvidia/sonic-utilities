@@ -98,5 +98,10 @@ def test_set_fips_uboot(run_command_patch, popen_patch):
 def test_verify_image_sign():
     bootloader = uboot.UbootBootloader()
     image = 'test-image'
-    # Test convertion image dir to image name
-    assert bootloader.verify_image_sign(image) == True
+    return_value =
+    try:
+        return_value = bootloader.verify_image_sign(image)
+    except NotImplementedError:
+        pass
+    else:
+        assert False, "Wrong return value from verify_image_sign, returned" + str(return_value)
