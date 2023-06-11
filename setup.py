@@ -5,9 +5,34 @@
 # under scripts/. Consider stop using scripts and use console_scripts instead
 #
 # https://stackoverflow.com/questions/18787036/difference-between-entry-points-console-scripts-and-scripts-in-setup-py
+from __future__ import print_function
+import sys
 import fastentrypoints
 
 from setuptools import setup
+import pkg_resources
+from packaging import version
+
+# sonic_dependencies, version requirement only supports '>='
+sonic_dependencies = [
+    'sonic-config-engine',
+    'sonic-platform-common',
+    'sonic-py-common',
+    'sonic-yang-mgmt',
+]
+
+for package in sonic_dependencies:
+    try:
+        package_dist = pkg_resources.get_distribution(package.split(">=")[0])
+    except pkg_resources.DistributionNotFound:
+        print(package + " is not found!", file=sys.stderr)
+        print("Please build and install SONiC python wheels dependencies from sonic-buildimage", file=sys.stderr)
+        exit(1)
+    if ">=" in package:
+        if version.parse(package_dist.version) >= version.parse(package.split(">=")[1]):
+            continue
+        print(package + " version not match!", file=sys.stderr)
+        exit(1)
 
 setup(
     name='sonic-utilities',
@@ -49,6 +74,7 @@ setup(
         'pddf_thermalutil',
         'pddf_ledutil',
         'syslog_util',
+        'rcli',
         'show',
         'show.interfaces',
         'show.plugins',
@@ -64,7 +90,7 @@ setup(
         'sonic_cli_gen',
     ],
     package_data={
-        'generic_config_updater': ['generic_config_updater.conf.json'],
+        'generic_config_updater': ['gcu_services_validator.conf.json', 'gcu_field_operation_validators.conf.json'],
         'show': ['aliases.ini'],
         'sonic_installer': ['aliases.ini'],
         'tests': ['acl_input/*',
@@ -103,6 +129,7 @@ setup(
         'scripts/fanshow',
         'scripts/fast-reboot',
         'scripts/fast-reboot-dump.py',
+        'scripts/fast-reboot-filter-routes.py',
         'scripts/fdbclear',
         'scripts/fdbshow',
         'scripts/fibshow',
@@ -113,6 +140,7 @@ setup(
         'scripts/intfutil',
         'scripts/intfstat',
         'scripts/ipintutil',
+        'scripts/lag_keepalive.py',
         'scripts/lldpshow',
         'scripts/log_ssd_health',
         'scripts/mellanox_buffer_migrator.py',
@@ -138,6 +166,7 @@ setup(
         'scripts/soft-reboot',
         'scripts/storyteller',
         'scripts/syseeprom-to-json',
+        'scripts/teamd_increase_retry_count.py',
         'scripts/tempershow',
         'scripts/tunnelstat',
         'scripts/update_json.py',
@@ -181,6 +210,8 @@ setup(
             'pddf_psuutil = pddf_psuutil.main:cli',
             'pddf_thermalutil = pddf_thermalutil.main:cli',
             'pddf_ledutil = pddf_ledutil.main:cli',
+            'rexec = rcli.rexec:cli',
+            'rshell = rcli.rshell:cli',
             'show = show.main:cli',
             'sonic-clear = clear.main:cli',
             'sonic-installer = sonic_installer.main:sonic_installer',
@@ -193,7 +224,10 @@ setup(
         ]
     },
     install_requires=[
+        'bcrypt==3.2.2',
         'click==7.0',
+        'cryptography==3.3.2',
+        'urllib3<2',
         'click-log>=0.3.2',
         'docker>=4.4.4',
         'docker-image-py>=0.1.10',
@@ -208,21 +242,18 @@ setup(
         'natsort>=6.2.1',  # 6.2.1 is the last version which supports Python 2. Can update once we no longer support Python 2
         'netaddr>=0.8.0',
         'netifaces>=0.10.7',
+        'paramiko==2.11.0',
         'pexpect>=4.8.0',
         'semantic-version>=2.8.5',
         'prettyprinter>=0.18.0',
         'pyroute2>=0.5.14, <0.6.1',
         'requests>=2.25.0',
-        'sonic-config-engine',
-        'sonic-platform-common',
-        'sonic-py-common',
-        'sonic-yang-mgmt',
         'tabulate==0.8.2',
         'toposort==1.6',
         'www-authenticate==0.9.2',
         'xmltodict==0.12.0',
         'lazy-object-proxy',
-    ],
+    ] + sonic_dependencies,
     setup_requires= [
         'pytest-runner',
         'wheel'

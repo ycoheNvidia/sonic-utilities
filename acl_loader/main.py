@@ -72,6 +72,10 @@ class AclLoader(object):
 
     ACL_TABLE = "ACL_TABLE"
     ACL_RULE = "ACL_RULE"
+    CFG_ACL_TABLE = "ACL_TABLE"
+    STATE_ACL_TABLE = "ACL_TABLE_TABLE"
+    CFG_ACL_RULE = "ACL_RULE"
+    STATE_ACL_RULE = "ACL_RULE_TABLE"
     ACL_TABLE_TYPE_MIRROR = "MIRROR"
     ACL_TABLE_TYPE_CTRLPLANE = "CTRLPLANE"
     CFG_MIRROR_SESSION_TABLE = "MIRROR_SESSION"
@@ -90,7 +94,7 @@ class AclLoader(object):
         "ETHERTYPE_LLDP": 0x88CC,
         "ETHERTYPE_VLAN": 0x8100,
         "ETHERTYPE_ROCE": 0x8915,
-        "ETHERTYPE_ARP": 0x0806,
+        "ETHERTYPE_ARP":  0x0806,
         "ETHERTYPE_IPV4": 0x0800,
         "ETHERTYPE_IPV6": 0x86DD,
         "ETHERTYPE_MPLS": 0x8847
@@ -117,11 +121,16 @@ class AclLoader(object):
         self.tables_db_info = {}
         self.rules_db_info = {}
         self.rules_info = {}
+        self.tables_state_info = None
+        self.rules_state_info = None
 
         # Load database config files
         load_db_config()
 
         self.sessions_db_info = {}
+        self.acl_table_status = {}
+        self.acl_rule_status = {}
+
         self.configdb = ConfigDBConnector()
         self.configdb.connect()
         self.statedb = SonicV2Connector(host="127.0.0.1")
@@ -156,6 +165,8 @@ class AclLoader(object):
         self.read_rules_info()
         self.read_sessions_info()
         self.read_policers_info()
+        self.acl_table_status = self.read_acl_object_status_info(self.CFG_ACL_TABLE, self.STATE_ACL_TABLE)
+        self.acl_rule_status = self.read_acl_object_status_info(self.CFG_ACL_RULE, self.STATE_ACL_RULE)
 
     def read_tables_info(self):
         """
@@ -210,7 +221,7 @@ class AclLoader(object):
         for key in self.sessions_db_info:
             if self.per_npu_statedb:
                 # For multi-npu platforms we will read from all front asic name space
-                # statedb as the monitor port will be differnt for each asic
+                # statedb as the monitor port will be different for each asic
                 # and it's status also might be different (ideally should not happen)
                 # We will store them as dict of 'asic' : value
                 self.sessions_db_info[key]["status"] = {}
@@ -223,6 +234,35 @@ class AclLoader(object):
                 state_db_info = self.statedb.get_all(self.statedb.STATE_DB, "{}|{}".format(self.STATE_MIRROR_SESSION_TABLE, key))
                 self.sessions_db_info[key]["status"] = state_db_info.get("status", "inactive") if state_db_info else "error"
                 self.sessions_db_info[key]["monitor_port"] = state_db_info.get("monitor_port", "") if state_db_info else ""
+
+    def read_acl_object_status_info(self, cfg_db_table_name, state_db_table_name):
+        """
+        Read ACL_TABLE status or ACL_RULE status from STATE_DB
+        """
+        if self.per_npu_configdb:
+            namespace_configdb = list(self.per_npu_configdb.values())[0]
+            keys = namespace_configdb.get_table(cfg_db_table_name).keys()
+        else:
+            keys = self.configdb.get_table(cfg_db_table_name).keys()
+
+        status = {}
+        for key in keys:
+            # For ACL_RULE, the key is (acl_table_name, acl_rule_name)
+            if isinstance(key, tuple):
+                state_db_key = key[0] + "|" + key[1]
+            else:
+                state_db_key = key
+            status[key] = {}
+            if self.per_npu_statedb:
+                status[key]['status'] = {}
+                for namespace_key, namespace_statedb in self.per_npu_statedb.items():
+                    state_db_info = namespace_statedb.get_all(self.statedb.STATE_DB, "{}|{}".format(state_db_table_name, state_db_key))
+                    status[key]['status'][namespace_key] = state_db_info.get("status", "N/A") if state_db_info else "N/A"
+            else:
+                state_db_info = self.statedb.get_all(self.statedb.STATE_DB, "{}|{}".format(state_db_table_name, state_db_key))
+                status[key]['status'] = state_db_info.get("status", "N/A") if state_db_info else "N/A"
+
+        return status
 
     def get_sessions_db_info(self):
         return self.sessions_db_info
@@ -305,6 +345,14 @@ class AclLoader(object):
         :return: True if table type is L3V6 else False
         """
         return self.tables_db_info[tname]["type"].upper() == "L3V6"
+
+    def is_table_l3v4v6(self, tname):
+        """
+        Check if ACL table type is L3V4V6
+        :param tname: ACL table name
+        :return: True if table type is L3V4V6 else False
+        """
+        return self.tables_db_info[tname]["type"].upper() == "L3V4V6"
 
     def is_table_l3(self, tname):
         """
@@ -469,6 +517,17 @@ class AclLoader(object):
                 # "IP_ICMP" we need to pick the correct protocol number for the IP version
                 if rule.ip.config.protocol == "IP_ICMP" and self.is_table_ipv6(table_name):
                     rule_props["IP_PROTOCOL"] = self.ip_protocol_map["IP_ICMPV6"]
+                elif rule.ip.config.protocol == "IP_ICMP" and  self.is_table_l3v4v6(table_name):
+                    # For L3V4V6 tables, both ICMP and ICMPv6 are supported,
+                    # so find the IP_PROTOCOL using the ether_type.
+                    try:
+                        ether_type = rule.l2.config.ethertype
+                    except Exception as e:
+                        ether_type = None
+                    if rule.l2.config.ethertype == "ETHERTYPE_IPV6":
+                        rule_props["IP_PROTOCOL"] = self.ip_protocol_map["IP_ICMPV6"]
+                    else:
+                        rule_props["IP_PROTOCOL"] = self.ip_protocol_map[rule.ip.config.protocol]
                 else:
                     rule_props["IP_PROTOCOL"] = self.ip_protocol_map[rule.ip.config.protocol]
             else:
@@ -504,9 +563,20 @@ class AclLoader(object):
     def convert_icmp(self, table_name, rule_idx, rule):
         rule_props = {}
 
-        is_table_v6 = self.is_table_ipv6(table_name)
-        type_key = "ICMPV6_TYPE" if is_table_v6 else "ICMP_TYPE"
-        code_key = "ICMPV6_CODE" if is_table_v6 else "ICMP_CODE"
+        is_rule_v6 = False
+        if self.is_table_ipv6(table_name):
+            is_rule_v6 = True
+        elif self.is_table_l3v4v6(table_name):
+            # get the IP version type using Ether-Type.
+            try:
+                ether_type = rule.l2.config.ethertype
+                if ether_type == "ETHERTYPE_IPV6":
+                    is_rule_v6 = True
+            except Exception as e:
+                pass
+
+        type_key = "ICMPV6_TYPE" if is_rule_v6 else "ICMP_TYPE"
+        code_key = "ICMPV6_CODE" if is_rule_v6 else "ICMP_CODE"
 
         if rule.icmp.config.type != "" and rule.icmp.config.type != "null":
             icmp_type = rule.icmp.config.type
@@ -611,7 +681,18 @@ class AclLoader(object):
         rule_props["PRIORITY"] = str(self.max_priority - rule_idx)
 
         # setup default ip type match to dataplane acl (could be overriden by rule later)
-        if self.is_table_l3v6(table_name):
+        if self.is_table_l3v4v6(table_name):
+            # ETHERTYPE must be passed and it should be one of IPv4 or IPv6
+            try:
+                ether_type =  rule.l2.config.ethertype
+            except Exception as e:
+                raise AclLoaderException("l2:ethertype must be provided for rule #{} in table:{} of type L3V4V6".format(rule_idx, table_name))
+            if ether_type not in ["ETHERTYPE_IPV4", "ETHERTYPE_IPV6"]:
+                # Ether type must be v4 or v6 to match IP fields, L4 (TCP/UDP) fields or ICMP fields
+                if rule.ip or rule.transport:
+                    raise AclLoaderException("ethertype={} is neither ETHERTYPE_IPV4 nor ETHERTYPE_IPV6 for IP rule #{} in table:{} type L3V4V6".format(rule.l2.config.ethertype, rule_idx, table_name))
+            rule_props["ETHER_TYPE"] = str(self.ethertype_map[ether_type])
+        elif self.is_table_l3v6(table_name):
             rule_props["IP_TYPE"] = "IPV6ANY"  # ETHERTYPE is not supported for DATAACLV6
         elif self.is_table_l3(table_name):
             rule_props["ETHER_TYPE"] = str(self.ethertype_map["ETHERTYPE_IPV4"])
@@ -630,6 +711,7 @@ class AclLoader(object):
     def deny_rule(self, table_name):
         """
         Create default deny rule in Config DB format
+        Only create default deny rule when table is [L3, L3V6]
         :param table_name: ACL table name to which rule belong
         :return: dict with Config DB schema
         """
@@ -637,10 +719,14 @@ class AclLoader(object):
         rule_data = {(table_name, "DEFAULT_RULE"): rule_props}
         rule_props["PRIORITY"] = str(self.min_priority)
         rule_props["PACKET_ACTION"] = "DROP"
-        if self.is_table_ipv6(table_name):
+        if self.is_table_l3v6(table_name):
             rule_props["IP_TYPE"] = "IPV6ANY"  # ETHERTYPE is not supported for DATAACLV6
-        else:
+        elif self.is_table_l3(table_name):
             rule_props["ETHER_TYPE"] = str(self.ethertype_map["ETHERTYPE_IPV4"])
+        elif self.is_table_l3v4v6(table_name):
+            rule_props["IP_TYPE"] = "IP" # Drop both v4 and v6 packets
+        else:
+            return {}  # Don't add default deny rule if table is not [L3, L3V6]
         return rule_data
 
     def convert_rules(self):
@@ -667,7 +753,7 @@ class AclLoader(object):
                 except AclLoaderException as ex:
                     error("Error processing rule %s: %s. Skipped." % (acl_entry_name, ex))
 
-            if not self.is_table_mirror(table_name) and not self.is_table_egress(table_name):
+            if not self.is_table_egress(table_name):
                 deep_update(self.rules_info, self.deny_rule(table_name))
 
     def full_update(self):
@@ -786,7 +872,7 @@ class AclLoader(object):
         :param table_name: Optional. ACL table name. Filter tables by specified name.
         :return:
         """
-        header = ("Name", "Type", "Binding", "Description", "Stage")
+        header = ("Name", "Type", "Binding", "Description", "Stage", "Status")
 
         data = []
         for key, val in self.get_tables_db_info().items():
@@ -794,24 +880,28 @@ class AclLoader(object):
                 continue
 
             stage = val.get("stage", Stage.INGRESS).lower()
-
+            # Get ACL table status from STATE_DB
+            if key in self.acl_table_status:
+                status = self.acl_table_status[key]['status']
+            else:
+                status = 'N/A'
             if val["type"] == AclLoader.ACL_TABLE_TYPE_CTRLPLANE:
                 services = natsorted(val["services"])
-                data.append([key, val["type"], services[0], val["policy_desc"], stage])
+                data.append([key, val["type"], services[0], val["policy_desc"], stage, status])
 
                 if len(services) > 1:
                     for service in services[1:]:
-                        data.append(["", "", service, "", ""])
+                        data.append(["", "", service, "", "", ""])
             else:
                 if not val["ports"]:
-                    data.append([key, val["type"], "", val["policy_desc"], stage])
+                    data.append([key, val["type"], "", val["policy_desc"], stage, status])
                 else:
                     ports = natsorted(val["ports"])
-                    data.append([key, val["type"], ports[0], val["policy_desc"], stage])
+                    data.append([key, val["type"], ports[0], val["policy_desc"], stage, status])
 
                     if len(ports) > 1:
                         for port in ports[1:]:
-                            data.append(["", "", port, "", ""])
+                            data.append(["", "", port, "", "", ""])
 
         print(tabulate.tabulate(data, headers=header, tablefmt="simple", missingval=""))
 
@@ -873,7 +963,7 @@ class AclLoader(object):
         :param rule_id: Optional. ACL rule name. Filter rule by specified rule name.
         :return:
         """
-        header = ("Table", "Rule", "Priority", "Action", "Match")
+        header = ("Table", "Rule", "Priority", "Action", "Match", "Status")
 
         def pop_priority(val):
             priority = "N/A"
@@ -919,11 +1009,16 @@ class AclLoader(object):
             priority = pop_priority(val)
             action = pop_action(val)
             matches = pop_matches(val)
-
-            rule_data = [[tname, rid, priority, action, matches[0]]]
+            # Get ACL rule status from STATE_DB
+            status_key = (tname, rid)
+            if status_key in self.acl_rule_status:
+                status = self.acl_rule_status[status_key]['status']
+            else:
+                status = "N/A"
+            rule_data = [[tname, rid, priority, action, matches[0], status]]
             if len(matches) > 1:
                 for m in matches[1:]:
-                    rule_data.append(["", "", "", "", m])
+                    rule_data.append(["", "", "", "", m, ""])
 
             raw_data.append([priority, rule_data])
 

@@ -813,7 +813,7 @@ def hexdump(indent, data, mem_address):
             result += '{} '.format(byte_string)
             result += '|{}|'.format(ascii_string)
             ascii_string = ""
-        elif mem_address % 16 == 7:
+        elif mem_address % 16 == 8:
             result += ' {} '.format(byte_string)
         else:
             result += '{} '.format(byte_string)
@@ -906,11 +906,11 @@ def fetch_error_status_from_platform_api(port):
         "    errors=['{}:{}'.format(sfp.index, 'OK (Not implemented)') for sfp in sfp_list]\n" \
         "print(errors)\n"
 
-    get_error_status_command = "docker exec pmon python3 -c \"{}{}{}\"".format(
-        init_chassis_code, generate_sfp_list_code, get_error_status_code)
+    get_error_status_command = ["docker", "exec", "pmon", "python3", "-c", "{}{}{}".format(
+        init_chassis_code, generate_sfp_list_code, get_error_status_code)]
     # Fetch error status from pmon docker
     try:
-        output = subprocess.check_output(get_error_status_command, shell=True, universal_newlines=True)
+        output = subprocess.check_output(get_error_status_command, universal_newlines=True)
     except subprocess.CalledProcessError as e:
         click.Abort("Error! Unable to fetch error status for SPF modules. Error code = {}, error messages: {}".format(e.returncode, e.output))
         return None
@@ -1201,6 +1201,18 @@ def reset(port_name):
 
         i += 1
 
+def update_firmware_info_to_state_db(port_name):
+    physical_port = logical_port_to_physical_port_index(port_name)
+
+    namespaces = multi_asic.get_front_end_namespaces()
+    for namespace in namespaces:
+        state_db = SonicV2Connector(use_unix_socket_path=False, namespace=namespace)
+        if state_db is not None:
+            state_db.connect(state_db.STATE_DB)
+            active_firmware, inactive_firmware = platform_chassis.get_sfp(physical_port).get_transceiver_info_firmware_versions()
+            state_db.set(state_db.STATE_DB, 'TRANSCEIVER_INFO|{}'.format(port_name), "active_firmware", active_firmware)
+            state_db.set(state_db.STATE_DB, 'TRANSCEIVER_INFO|{}'.format(port_name), "inactive_firmware", inactive_firmware)
+
 # 'firmware' subgroup
 @cli.group()
 def firmware():
@@ -1271,7 +1283,7 @@ def is_fw_switch_done(port_name):
 
         if fw_info['status'] == True:
             (ImageA, ImageARunning, ImageACommitted, ImageAInvalid,
-             ImageB, ImageBRunning, ImageBCommitted, ImageBInvalid) = fw_info['result']
+             ImageB, ImageBRunning, ImageBCommitted, ImageBInvalid, _, _) = fw_info['result']
 
             if (ImageARunning == 1) and (ImageAInvalid == 1):       # ImageA is running, but also invalid.
                 click.echo("FW info error : ImageA shows running, but also shows invalid!")
@@ -1382,19 +1394,20 @@ def download_firmware(port_name, filepath):
     sfp.set_optoe_write_max(1)
 
     status = api.cdb_firmware_download_complete()
+    update_firmware_info_to_state_db(port_name)
     click.echo('CDB: firmware download complete')
     return status
 
 # 'run' subcommand
 @firmware.command()
 @click.argument('port_name', required=True, default=None)
-@click.option('--mode', default="1", type=click.Choice(["0", "1", "2", "3"]), show_default=True,
+@click.option('--mode', default="0", type=click.Choice(["0", "1", "2", "3"]), show_default=True,
                                                          help="0 = Non-hitless Reset to Inactive Image\n \
                                                                1 = Hitless Reset to Inactive Image (Default)\n \
                                                                2 = Attempt non-hitless Reset to Running Image\n \
                                                                3 = Attempt Hitless Reset to Running Image\n")
 def run(port_name, mode):
-    """Run the firmware with default mode=1"""
+    """Run the firmware with default mode=0"""
 
     if is_port_type_rj45(port_name):
         click.echo("This functionality is not applicable for RJ45 port {}.".format(port_name))
@@ -1409,6 +1422,7 @@ def run(port_name, mode):
         click.echo('Failed to run firmware in mode={}! CDB status: {}'.format(mode, status))
         sys.exit(EXIT_FAIL)
 
+    update_firmware_info_to_state_db(port_name)
     click.echo("Firmware run in mode={} success".format(mode))
 
 # 'commit' subcommand
@@ -1430,6 +1444,7 @@ def commit(port_name):
         click.echo('Failed to commit firmware! CDB status: {}'.format(status))
         sys.exit(EXIT_FAIL)
 
+    update_firmware_info_to_state_db(port_name)
     click.echo("Firmware commit successful")
 
 # 'upgrade' subcommand
@@ -1458,12 +1473,13 @@ def upgrade(port_name, filepath):
         click.echo("Firmware download complete failed! CDB status = {}".format(status))
         sys.exit(EXIT_FAIL)
 
-    status = run_firmware(port_name, 1)
+    default_mode = 0
+    status = run_firmware(port_name, default_mode)
     if status != 1:
-        click.echo('Failed to run firmware in mode=1 ! CDB status: {}'.format(status))
+        click.echo('Failed to run firmware in mode={} ! CDB status: {}'.format(default_mode, status))
         sys.exit(EXIT_FAIL)
 
-    click.echo("Firmware run in mode 1 successful")
+    click.echo("Firmware run in mode {} successful".format(default_mode))
 
     if is_fw_switch_done(port_name) != 1:
         click.echo('Failed to switch firmware images!')

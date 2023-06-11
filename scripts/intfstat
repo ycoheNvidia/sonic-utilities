@@ -308,7 +308,7 @@ def main():
                         general_data = json.load(open(cnstat_fqn_general_file, 'r'))
                         for key, val in cnstat_dict.items():
                             general_data[key] = val
-                        json.dump(general_data, open(cnstat_fqn_general_file, 'w'))
+                        json.dump(general_data, open(cnstat_fqn_general_file, 'w'), default=json_serial)
                     except IOError as e:
                         sys.exit(e.errno)
             # Add the information also to tag specific file
@@ -316,7 +316,7 @@ def main():
                 data = json.load(open(cnstat_fqn_file, 'r'))
                 for key, val in cnstat_dict.items():
                     data[key] = val
-                json.dump(data, open(cnstat_fqn_file, 'w'))
+                json.dump(data, open(cnstat_fqn_file, 'w'), default=json_serial)
             else:
                 json.dump(cnstat_dict, open(cnstat_fqn_file, 'w'), default=json_serial)
         except IOError as e:

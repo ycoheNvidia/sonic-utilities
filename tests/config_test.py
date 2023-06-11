@@ -1,3 +1,4 @@
+import pytest
 import filecmp
 import importlib
 import os
@@ -8,6 +9,7 @@ import sys
 import unittest
 import ipaddress
 from unittest import mock
+from jsonpatch import JsonPatchConflict
 
 import click
 from click.testing import CliRunner
@@ -15,7 +17,7 @@ from click.testing import CliRunner
 from sonic_py_common import device_info
 from utilities_common.db import Db
 from utilities_common.general import load_module_from_source
-from mock import patch
+from mock import call, patch, mock_open, MagicMock
 
 from generic_config_updater.generic_updater import ConfigFormat
 
@@ -34,12 +36,27 @@ os.environ["PATH"] += os.pathsep + scripts_path
 # Config Reload input Path
 mock_db_path = os.path.join(test_path, "config_reload_input")
 
+# Load minigraph input Path
+load_minigraph_input_path = os.path.join(test_path, "load_minigraph_input")
+load_minigraph_platform_path = os.path.join(load_minigraph_input_path, "platform")
+load_minigraph_platform_false_path = os.path.join(load_minigraph_input_path, "platform_false")
 
 load_minigraph_command_output="""\
 Stopping SONiC target ...
 Running command: /usr/local/bin/sonic-cfggen -H -m --write-to-db
 Running command: config qos reload --no-dynamic-buffer --no-delay
 Running command: pfcwd start_default
+Restarting SONiC target ...
+Reloading Monit configuration ...
+Please note setting loaded from minigraph will be lost after system reboot. To preserve setting, run `config save`.
+"""
+
+load_minigraph_platform_plugin_command_output="""\
+Stopping SONiC target ...
+Running command: /usr/local/bin/sonic-cfggen -H -m --write-to-db
+Running command: config qos reload --no-dynamic-buffer --no-delay
+Running command: pfcwd start_default
+Running Platform plugin ............!
 Restarting SONiC target ...
 Reloading Monit configuration ...
 Please note setting loaded from minigraph will be lost after system reboot. To preserve setting, run `config save`.
@@ -52,7 +69,8 @@ change hostname to dummy
 Running command: ifconfig eth0 10.0.0.100 netmask 255.255.255.0
 Running command: ip route add default via 10.0.0.1 dev eth0 table default
 Running command: ip rule add from 10.0.0.100 table default
-Running command: [ -f /var/run/dhclient.eth0.pid ] && kill `cat /var/run/dhclient.eth0.pid` && rm -f /var/run/dhclient.eth0.pid
+Running command: kill `cat /var/run/dhclient.eth0.pid`
+Running command: rm -f /var/run/dhclient.eth0.pid
 Please note loaded setting will be lost after system reboot. To preserve setting, run `config save`.
 """
 
@@ -63,7 +81,8 @@ change hostname to dummy
 Running command: ifconfig eth0 add fc00:1::32/64
 Running command: ip -6 route add default via fc00:1::1 dev eth0 table default
 Running command: ip -6 rule add from fc00:1::32 table default
-Running command: [ -f /var/run/dhclient.eth0.pid ] && kill `cat /var/run/dhclient.eth0.pid` && rm -f /var/run/dhclient.eth0.pid
+Running command: kill `cat /var/run/dhclient.eth0.pid`
+Running command: rm -f /var/run/dhclient.eth0.pid
 Please note loaded setting will be lost after system reboot. To preserve setting, run `config save`.
 """
 
@@ -77,29 +96,30 @@ Running command: ip rule add from 10.0.0.100 table default
 Running command: ifconfig eth0 add fc00:1::32/64
 Running command: ip -6 route add default via fc00:1::1 dev eth0 table default
 Running command: ip -6 rule add from fc00:1::32 table default
-Running command: [ -f /var/run/dhclient.eth0.pid ] && kill `cat /var/run/dhclient.eth0.pid` && rm -f /var/run/dhclient.eth0.pid
+Running command: kill `cat /var/run/dhclient.eth0.pid`
+Running command: rm -f /var/run/dhclient.eth0.pid
 Please note loaded setting will be lost after system reboot. To preserve setting, run `config save`.
 """
 
 RELOAD_CONFIG_DB_OUTPUT = """\
 Stopping SONiC target ...
-Running command: /usr/local/bin/sonic-cfggen  -j /tmp/config.json  --write-to-db
+Running command: /usr/local/bin/sonic-cfggen -j /tmp/config.json --write-to-db
 Restarting SONiC target ...
 Reloading Monit configuration ...
 """
 
 RELOAD_YANG_CFG_OUTPUT = """\
 Stopping SONiC target ...
-Running command: /usr/local/bin/sonic-cfggen  -Y /tmp/config.json  --write-to-db
+Running command: /usr/local/bin/sonic-cfggen -Y /tmp/config.json --write-to-db
 Restarting SONiC target ...
 Reloading Monit configuration ...
 """
 
 RELOAD_MASIC_CONFIG_DB_OUTPUT = """\
 Stopping SONiC target ...
-Running command: /usr/local/bin/sonic-cfggen  -j /tmp/config.json  --write-to-db
-Running command: /usr/local/bin/sonic-cfggen  -j /tmp/config.json  -n asic0  --write-to-db
-Running command: /usr/local/bin/sonic-cfggen  -j /tmp/config.json  -n asic1  --write-to-db
+Running command: /usr/local/bin/sonic-cfggen -j /tmp/config.json --write-to-db
+Running command: /usr/local/bin/sonic-cfggen -j /tmp/config.json -n asic0 --write-to-db
+Running command: /usr/local/bin/sonic-cfggen -j /tmp/config.json -n asic1 --write-to-db
 Restarting SONiC target ...
 Reloading Monit configuration ...
 """
@@ -109,26 +129,28 @@ Running command: /usr/local/bin/sonic-cfggen -H -k Seastone-DX010-25-50 --write-
 
 reload_config_with_disabled_service_output="""\
 Stopping SONiC target ...
-Running command: /usr/local/bin/sonic-cfggen  -j /tmp/config.json  --write-to-db
+Running command: /usr/local/bin/sonic-cfggen -j /tmp/config.json --write-to-db
 Restarting SONiC target ...
 Reloading Monit configuration ...
 """
 
-reload_config_with_untriggered_timer_output="""\
-Relevant services are not up. Retry later or use -f to avoid system checks
-"""
-
 def mock_run_command_side_effect(*args, **kwargs):
     command = args[0]
+    if isinstance(command, str):
+        command = command
+    elif isinstance(command, list):
+        command = ' '.join(command)
 
     if kwargs.get('display_cmd'):
+        if 'cat /var/run/dhclient.eth0.pid' in command:
+            command = 'kill `cat /var/run/dhclient.eth0.pid`'
         click.echo(click.style("Running command: ", fg='cyan') + click.style(command, fg='green'))
 
     if kwargs.get('return_cmd'):
         if command == "systemctl list-dependencies --plain sonic-delayed.target | sed '1d'":
-            return 'snmp.timer' , 0
-        elif command == "systemctl list-dependencies --plain sonic.target | sed '1d'":
-            return 'swss', 0
+            return 'snmp.timer', 0
+        elif command == "systemctl list-dependencies --plain sonic.target":
+            return 'sonic.target\nswss', 0
         elif command == "systemctl is-enabled snmp.timer":
             return 'enabled', 0
         else:
@@ -136,6 +158,10 @@ def mock_run_command_side_effect(*args, **kwargs):
 
 def mock_run_command_side_effect_disabled_timer(*args, **kwargs):
     command = args[0]
+    if isinstance(command, str):
+        command = command
+    elif isinstance(command, list):
+        command = ' '.join(command)
 
     if kwargs.get('display_cmd'):
         click.echo(click.style("Running command: ", fg='cyan') + click.style(command, fg='green'))
@@ -143,8 +169,8 @@ def mock_run_command_side_effect_disabled_timer(*args, **kwargs):
     if kwargs.get('return_cmd'):
         if command == "systemctl list-dependencies --plain sonic-delayed.target | sed '1d'":
             return 'snmp.timer', 0
-        elif command == "systemctl list-dependencies --plain sonic.target | sed '1d'":
-            return 'swss', 0
+        elif command == "systemctl list-dependencies --plain sonic.target":
+            return 'sonic.target\nswss', 0
         elif command == "systemctl is-enabled snmp.timer":
             return 'masked', 0
         elif command == "systemctl show swss.service --property ActiveState --value":
@@ -154,44 +180,45 @@ def mock_run_command_side_effect_disabled_timer(*args, **kwargs):
         else:
             return '', 0
 
-def mock_run_command_side_effect_untriggered_timer(*args, **kwargs):
-    command = args[0]
-
-    if kwargs.get('display_cmd'):
-        click.echo(click.style("Running command: ", fg='cyan') + click.style(command, fg='green'))
-
-    if kwargs.get('return_cmd'):
-        if command == "systemctl list-dependencies --plain sonic-delayed.target | sed '1d'":
-            return 'snmp.timer', 0
-        elif command == "systemctl list-dependencies --plain sonic.target | sed '1d'":
-            return 'swss', 0
-        elif command == "systemctl is-enabled snmp.timer":
-            return 'enabled', 0
-        elif command == "systemctl show snmp.timer --property=LastTriggerUSecMonotonic --value":
-            return '0', 0
-        else:
-            return '', 0
-
-def mock_run_command_side_effect_gnmi(*args, **kwargs):
-    command = args[0]
-
-    if kwargs.get('display_cmd'):
-        click.echo(click.style("Running command: ", fg='cyan') + click.style(command, fg='green'))
-
-    if kwargs.get('return_cmd'):
-        if command == "systemctl list-dependencies --plain sonic-delayed.target | sed '1d'":
-            return 'gnmi.timer', 0
-        elif command == "systemctl list-dependencies --plain sonic.target | sed '1d'":
-            return 'swss', 0
-        elif command == "systemctl is-enabled gnmi.timer":
-            return 'enabled', 0
-        else:
-            return '', 0
-
-
 # Load sonic-cfggen from source since /usr/local/bin/sonic-cfggen does not have .py extension.
 sonic_cfggen = load_module_from_source('sonic_cfggen', '/usr/local/bin/sonic-cfggen')
 
+class TestHelper(object):
+    def setup(self):
+        print("SETUP")
+
+    @patch('config.main.subprocess.Popen')
+    def test_get_device_type(self, mock_subprocess):
+        mock_subprocess.return_value.communicate.return_value = ("BackendToRRouter ", None)
+        device_type = config._get_device_type()
+        mock_subprocess.assert_called_with(['/usr/local/bin/sonic-cfggen', '-m', '-v', 'DEVICE_METADATA.localhost.type'], text=True, stdout=-1)
+        assert device_type == "BackendToRRouter"
+
+        mock_subprocess.return_value.communicate.return_value = (None, "error")
+        device_type = config._get_device_type()
+        mock_subprocess.assert_called_with(['/usr/local/bin/sonic-cfggen', '-m', '-v', 'DEVICE_METADATA.localhost.type'], text=True, stdout=-1)
+        assert device_type == "Unknown"
+
+    def teardown(self):
+        print("TEARDOWN")
+
+class TestConfig(object):
+    def setup(self):
+        print("SETUP")
+
+    @patch('config.main.subprocess.check_call')
+    def test_platform_fw_install(self, mock_check_call):
+        runner = CliRunner()
+        result = runner.invoke(config.config.commands['platform'].commands['firmware'].commands['install'], ['chassis', 'component', 'BIOS', 'fw', '/firmware_path'])
+        assert result.exit_code == 0
+        mock_check_call.assert_called_with(["fwutil", "install", 'chassis', 'component', 'BIOS', 'fw', '/firmware_path'])
+
+    @patch('config.main.subprocess.check_call')
+    def test_plattform_fw_update(self, mock_check_call):
+        runner = CliRunner()
+        result = runner.invoke(config.config.commands['platform'].commands['firmware'].commands['update'], ['update', 'module', 'Module1', 'component', 'BIOS', 'fw'])
+        assert result.exit_code == 0
+        mock_check_call.assert_called_with(["fwutil", "update", 'update', 'module', 'Module1', 'component', 'BIOS', 'fw'])
 
 class TestConfigReload(object):
     dummy_cfg_file = os.path.join(os.sep, "tmp", "config.json")
@@ -234,32 +261,6 @@ class TestConfigReload(object):
 
             assert "\n".join([l.rstrip() for l in result.output.split('\n')][:1]) == reload_config_with_sys_info_command_output
 
-    def test_config_reload_untriggered_timer(self, get_cmd_module, setup_single_broadcom_asic):
-        with mock.patch("utilities_common.cli.run_command", mock.MagicMock(side_effect=mock_run_command_side_effect_untriggered_timer)) as mock_run_command:
-            (config, show) = get_cmd_module
-
-            jsonfile_config = os.path.join(mock_db_path, "config_db.json")
-            jsonfile_init_cfg = os.path.join(mock_db_path, "init_cfg.json")
-
-            # create object
-            config.INIT_CFG_FILE = jsonfile_init_cfg
-            config.DEFAULT_CONFIG_DB_FILE =  jsonfile_config
-
-            db = Db()
-            runner = CliRunner()
-            obj = {'config_db': db.cfgdb}
-
-            # simulate 'config reload' to provoke load_sys_info option
-            result = runner.invoke(config.config.commands["reload"], ["-l", "-y"], obj=obj)
-
-            print(result.exit_code)
-            print(result.output)
-            traceback.print_tb(result.exc_info[2])
-
-            assert result.exit_code == 1
-
-            assert "\n".join([l.rstrip() for l in result.output.split('\n')][:2]) == reload_config_with_untriggered_timer_output
-
     @classmethod
     def teardown_class(cls):
         print("TEARDOWN")
@@ -280,6 +281,7 @@ class TestLoadMinigraph(object):
         import config.main
         importlib.reload(config.main)
 
+    @mock.patch('sonic_py_common.device_info.get_paths_to_platform_and_hwsku_dirs', mock.MagicMock(return_value=("dummy_path", None)))
     def test_load_minigraph(self, get_cmd_module, setup_single_broadcom_asic):
         with mock.patch("utilities_common.cli.run_command", mock.MagicMock(side_effect=mock_run_command_side_effect)) as mock_run_command:
             (config, show) = get_cmd_module
@@ -291,13 +293,12 @@ class TestLoadMinigraph(object):
             assert result.exit_code == 0
             assert "\n".join([l.rstrip() for l in result.output.split('\n')]) == load_minigraph_command_output
             # Verify "systemctl reset-failed" is called for services under sonic.target
-            mock_run_command.assert_any_call('systemctl reset-failed swss')
-            # Verify "systemctl reset-failed" is called for services under sonic-delayed.target
-            mock_run_command.assert_any_call('systemctl reset-failed snmp')
-            assert mock_run_command.call_count == 11
+            mock_run_command.assert_any_call(['systemctl', 'reset-failed', 'swss'])
+            assert mock_run_command.call_count == 8
 
-    def test_load_minigraph_with_gnmi_timer(self, get_cmd_module, setup_single_broadcom_asic):
-        with mock.patch("utilities_common.cli.run_command", mock.MagicMock(side_effect=mock_run_command_side_effect_gnmi)) as mock_run_command:
+    @mock.patch('sonic_py_common.device_info.get_paths_to_platform_and_hwsku_dirs', mock.MagicMock(return_value=(load_minigraph_platform_path, None)))
+    def test_load_minigraph_platform_plugin(self, get_cmd_module, setup_single_broadcom_asic):
+        with mock.patch("utilities_common.cli.run_command", mock.MagicMock(side_effect=mock_run_command_side_effect)) as mock_run_command:
             (config, show) = get_cmd_module
             runner = CliRunner()
             result = runner.invoke(config.config.commands["load_minigraph"], ["-y"])
@@ -305,13 +306,25 @@ class TestLoadMinigraph(object):
             print(result.output)
             traceback.print_tb(result.exc_info[2])
             assert result.exit_code == 0
-            assert "\n".join([l.rstrip() for l in result.output.split('\n')]) == load_minigraph_command_output
+            assert "\n".join([l.rstrip() for l in result.output.split('\n')]) == load_minigraph_platform_plugin_command_output
             # Verify "systemctl reset-failed" is called for services under sonic.target
-            mock_run_command.assert_any_call('systemctl reset-failed swss')
-            # Verify "systemctl reset-failed" is called for services under sonic-delayed.target
-            mock_run_command.assert_any_call('systemctl reset-failed gnmi')
-            assert mock_run_command.call_count == 11
+            mock_run_command.assert_any_call(['systemctl', 'reset-failed', 'swss'])
+            assert mock_run_command.call_count == 8
 
+    @mock.patch('sonic_py_common.device_info.get_paths_to_platform_and_hwsku_dirs', mock.MagicMock(return_value=(load_minigraph_platform_false_path, None)))
+    def test_load_minigraph_platform_plugin_fail(self, get_cmd_module, setup_single_broadcom_asic):
+        print(load_minigraph_platform_false_path)
+        with mock.patch("utilities_common.cli.run_command", mock.MagicMock(side_effect=mock_run_command_side_effect)) as mock_run_command:
+            (config, show) = get_cmd_module
+            runner = CliRunner()
+            result = runner.invoke(config.config.commands["load_minigraph"], ["-y"])
+            print(result.exit_code)
+            print(result.output)
+            traceback.print_tb(result.exc_info[2])
+            assert result.exit_code != 0
+            assert "Platform plugin failed" in result.output
+
+    @mock.patch('sonic_py_common.device_info.get_paths_to_platform_and_hwsku_dirs', mock.MagicMock(return_value=("dummy_path", None)))
     def test_load_minigraph_with_port_config_bad_format(self, get_cmd_module, setup_single_broadcom_asic):
         with mock.patch(
             "utilities_common.cli.run_command",
@@ -326,6 +339,7 @@ class TestLoadMinigraph(object):
             port_config = [{}]
             self.check_port_config(None, config, port_config, "Failed to load port_config.json, Error: Bad format: PORT table not exists")
 
+    @mock.patch('sonic_py_common.device_info.get_paths_to_platform_and_hwsku_dirs', mock.MagicMock(return_value=("dummy_path", None)))
     def test_load_minigraph_with_port_config_inconsistent_port(self, get_cmd_module, setup_single_broadcom_asic):
         with mock.patch(
             "utilities_common.cli.run_command",
@@ -337,6 +351,7 @@ class TestLoadMinigraph(object):
             port_config = [{"PORT": {"Eth1": {"admin_status": "up"}}}]
             self.check_port_config(db, config, port_config, "Failed to load port_config.json, Error: Port Eth1 is not defined in current device")
 
+    @mock.patch('sonic_py_common.device_info.get_paths_to_platform_and_hwsku_dirs', mock.MagicMock(return_value=("dummy_path", None)))
     def test_load_minigraph_with_port_config(self, get_cmd_module, setup_single_broadcom_asic):
         with mock.patch(
             "utilities_common.cli.run_command",
@@ -354,49 +369,7 @@ class TestLoadMinigraph(object):
             port_config = [{"PORT": {"Ethernet0": {"admin_status": "up"}}}]
             self.check_port_config(db, config, port_config, "config interface startup Ethernet0")
 
-    def test_load_backend_acl(self, get_cmd_module, setup_single_broadcom_asic):
-        db = Db()
-        db.cfgdb.set_entry("DEVICE_METADATA", "localhost", {"storage_device": "true"})
-        self.check_backend_acl(get_cmd_module, db, device_type='BackEndToRRouter', condition=True)
-
-    def test_load_backend_acl_not_storage(self, get_cmd_module, setup_single_broadcom_asic):
-        db = Db()
-        self.check_backend_acl(get_cmd_module, db, device_type='BackEndToRRouter', condition=False)
-
-    def test_load_backend_acl_storage_leaf(self, get_cmd_module, setup_single_broadcom_asic):
-        db = Db()
-        db.cfgdb.set_entry("DEVICE_METADATA", "localhost", {"storage_device": "true"})
-        self.check_backend_acl(get_cmd_module, db, device_type='BackEndLeafRouter', condition=False)
-
-    def test_load_backend_acl_storage_no_dataacl(self, get_cmd_module, setup_single_broadcom_asic):
-        db = Db()
-        db.cfgdb.set_entry("DEVICE_METADATA", "localhost", {"storage_device": "true"})
-        db.cfgdb.set_entry("ACL_TABLE", "DATAACL", None)
-        self.check_backend_acl(get_cmd_module, db, device_type='BackEndToRRouter', condition=False)
-
-    def check_backend_acl(self, get_cmd_module, db, device_type='BackEndToRRouter', condition=True):
-        def is_file_side_effect(filename):
-            return True if 'backend_acl' in filename else False
-        with mock.patch('os.path.isfile', mock.MagicMock(side_effect=is_file_side_effect)):
-            with mock.patch('config.main._get_device_type', mock.MagicMock(return_value=device_type)):
-                with mock.patch(
-                    "utilities_common.cli.run_command",
-                    mock.MagicMock(side_effect=mock_run_command_side_effect)) as mock_run_command:
-                    (config, show) = get_cmd_module
-                    runner = CliRunner()
-                    result = runner.invoke(config.config.commands["load_minigraph"], ["-y"], obj=db)
-                    print(result.exit_code)
-                    expected_output = ['Running command: acl-loader update incremental /etc/sonic/backend_acl.json',
-                                       'Running command: /usr/local/bin/sonic-cfggen -d -t /usr/share/sonic/templates/backend_acl.j2,/etc/sonic/backend_acl.json'
-                                      ]
-                    print(result.output)
-                    assert result.exit_code == 0
-                    output = result.output.split('\n')
-                    if condition:
-                        assert set(expected_output).issubset(set(output))
-                    else:
-                        assert not(set(expected_output).issubset(set(output)))
-
+    @mock.patch('sonic_py_common.device_info.get_paths_to_platform_and_hwsku_dirs', mock.MagicMock(return_value=("dummy_path", None)))
     def check_port_config(self, db, config, port_config, expected_output):
         def read_json_file_side_effect(filename):
             return port_config
@@ -411,6 +384,7 @@ class TestLoadMinigraph(object):
                 assert result.exit_code == 0
                 assert expected_output in result.output
 
+    @mock.patch('sonic_py_common.device_info.get_paths_to_platform_and_hwsku_dirs', mock.MagicMock(return_value=("dummy_path", None)))
     def test_load_minigraph_with_non_exist_golden_config_path(self, get_cmd_module):
         def is_file_side_effect(filename):
             return True if 'golden_config' in filename else False
@@ -422,6 +396,7 @@ class TestLoadMinigraph(object):
             assert result.exit_code != 0
             assert "Cannot find 'non_exist.json'" in result.output
 
+    @mock.patch('sonic_py_common.device_info.get_paths_to_platform_and_hwsku_dirs', mock.MagicMock(return_value=("dummy_path", None)))
     def test_load_minigraph_with_specified_golden_config_path(self, get_cmd_module):
         def is_file_side_effect(filename):
             return True if 'golden_config' in filename else False
@@ -433,6 +408,7 @@ class TestLoadMinigraph(object):
             assert result.exit_code == 0
             assert "config override-config-table golden_config.json" in result.output
 
+    @mock.patch('sonic_py_common.device_info.get_paths_to_platform_and_hwsku_dirs', mock.MagicMock(return_value=("dummy_path", None)))
     def test_load_minigraph_with_default_golden_config_path(self, get_cmd_module):
         def is_file_side_effect(filename):
             return True if 'golden_config' in filename else False
@@ -444,6 +420,7 @@ class TestLoadMinigraph(object):
             assert result.exit_code == 0
             assert "config override-config-table /etc/sonic/golden_config_db.json" in result.output
 
+    @mock.patch('sonic_py_common.device_info.get_paths_to_platform_and_hwsku_dirs', mock.MagicMock(return_value=("dummy_path", None)))
     def test_load_minigraph_with_traffic_shift_away(self, get_cmd_module):
         with mock.patch("utilities_common.cli.run_command", mock.MagicMock(side_effect=mock_run_command_side_effect)) as mock_run_command:
             (config, show) = get_cmd_module
@@ -455,6 +432,7 @@ class TestLoadMinigraph(object):
             assert result.exit_code == 0
             assert "TSA" in result.output
 
+    @mock.patch('sonic_py_common.device_info.get_paths_to_platform_and_hwsku_dirs', mock.MagicMock(return_value=("dummy_path", None)))
     def test_load_minigraph_with_traffic_shift_away_with_golden_config(self, get_cmd_module):
         with mock.patch("utilities_common.cli.run_command", mock.MagicMock(side_effect=mock_run_command_side_effect)) as mock_run_command:
             def is_file_side_effect(filename):
@@ -693,7 +671,7 @@ class TestConfigQos(object):
 
         with mock.patch('swsscommon.swsscommon.SonicV2Connector.keys',  side_effect=TestConfigQos._keys):
             TestConfigQos._keys_counter = 1
-            empty = _wait_until_clear("BUFFER_POOL_TABLE:*", 0.5,2)
+            empty = _wait_until_clear(["BUFFER_POOL_TABLE:*"], 0.5,2)
         assert empty
 
     def test_qos_wait_until_clear_not_empty(self):
@@ -701,8 +679,14 @@ class TestConfigQos(object):
 
         with mock.patch('swsscommon.swsscommon.SonicV2Connector.keys', side_effect=TestConfigQos._keys):
             TestConfigQos._keys_counter = 10
-            empty = _wait_until_clear("BUFFER_POOL_TABLE:*", 0.5,2)
+            empty = _wait_until_clear(["BUFFER_POOL_TABLE:*"], 0.5,2)
         assert not empty
+
+    @mock.patch('config.main._wait_until_clear')
+    def test_qos_clear_no_wait(self, _wait_until_clear):
+        from config.main import _clear_qos
+        _clear_qos(True, False)
+        _wait_until_clear.assert_called_with(['BUFFER_*_TABLE:*', 'BUFFER_*_SET'], interval=0.5, timeout=0, verbose=False)
 
     def test_qos_reload_single(
             self, get_cmd_module, setup_qos_mock_apis,
@@ -1521,7 +1505,7 @@ class TestConfigLoadMgmtConfig(object):
                 }
             }
         }
-        self.check_output(get_cmd_module, device_desc_result, load_mgmt_config_command_ipv4_only_output, 5)
+        self.check_output(get_cmd_module, device_desc_result, load_mgmt_config_command_ipv4_only_output, 7)
 
     def test_config_load_mgmt_config_ipv6_only(self, get_cmd_module, setup_single_broadcom_asic):
         device_desc_result = {
@@ -1536,7 +1520,7 @@ class TestConfigLoadMgmtConfig(object):
                 }
             }
         }
-        self.check_output(get_cmd_module, device_desc_result, load_mgmt_config_command_ipv6_only_output, 5)
+        self.check_output(get_cmd_module, device_desc_result, load_mgmt_config_command_ipv6_only_output, 7)
     
     def test_config_load_mgmt_config_ipv4_ipv6(self, get_cmd_module, setup_single_broadcom_asic):
         device_desc_result = {
@@ -1554,7 +1538,7 @@ class TestConfigLoadMgmtConfig(object):
                 }
             }
         }
-        self.check_output(get_cmd_module, device_desc_result, load_mgmt_config_command_ipv4_ipv6_output, 8)
+        self.check_output(get_cmd_module, device_desc_result, load_mgmt_config_command_ipv4_ipv6_output, 10)
 
     def check_output(self, get_cmd_module, parse_device_desc_xml_result, expected_output, expected_command_call_count):
         def parse_device_desc_xml_side_effect(filename):
@@ -1563,20 +1547,21 @@ class TestConfigLoadMgmtConfig(object):
         def change_hostname_side_effect(hostname):
             print("change hostname to {}".format(hostname))
         with mock.patch("utilities_common.cli.run_command", mock.MagicMock(side_effect=mock_run_command_side_effect)) as mock_run_command:
-            with mock.patch('config.main.parse_device_desc_xml', mock.MagicMock(side_effect=parse_device_desc_xml_side_effect)):
-                with mock.patch('config.main._change_hostname', mock.MagicMock(side_effect=change_hostname_side_effect)):
-                    (config, show) = get_cmd_module
-                    runner = CliRunner()
-                    with runner.isolated_filesystem():
-                        with open('device_desc.xml', 'w') as f:
-                            f.write('dummy')
-                            result = runner.invoke(config.config.commands["load_mgmt_config"], ["-y", "device_desc.xml"])
-                            print(result.exit_code)
-                            print(result.output)
-                            traceback.print_tb(result.exc_info[2])
-                            assert result.exit_code == 0
-                            assert "\n".join([l.rstrip() for l in result.output.split('\n')]) == expected_output
-                            assert mock_run_command.call_count == expected_command_call_count
+            with mock.patch('os.path.isfile', mock.MagicMock(return_value=True)):
+                with mock.patch('config.main.parse_device_desc_xml', mock.MagicMock(side_effect=parse_device_desc_xml_side_effect)):
+                    with mock.patch('config.main._change_hostname', mock.MagicMock(side_effect=change_hostname_side_effect)):
+                        (config, show) = get_cmd_module
+                        runner = CliRunner()
+                        with runner.isolated_filesystem():
+                            with open('device_desc.xml', 'w') as f:
+                                f.write('dummy')
+                                result = runner.invoke(config.config.commands["load_mgmt_config"], ["-y", "device_desc.xml"])
+                                print(result.exit_code)
+                                print(result.output)
+                                traceback.print_tb(result.exc_info[2])
+                                assert result.exit_code == 0
+                                assert "\n".join([l.rstrip() for l in result.output.split('\n')]) == expected_output
+                                assert mock_run_command.call_count == expected_command_call_count
 
     @classmethod
     def teardown_class(cls):
@@ -1910,3 +1895,474 @@ class TestConfigLoopback(object):
     @classmethod
     def teardown_class(cls):
         print("TEARDOWN")
+
+
+class TestConfigNtp(object):
+    @classmethod
+    def setup_class(cls):
+        print("SETUP")
+        import config.main
+        importlib.reload(config.main)
+
+    @patch("config.validated_config_db_connector.ValidatedConfigDBConnector.validated_set_entry", mock.Mock(side_effect=ValueError))
+    @patch("validated_config_db_connector.device_info.is_yang_config_validation_enabled", mock.Mock(return_value=True))
+    def test_add_ntp_server_failed_yang_validation(self):
+        config.ADHOC_VALIDATION = False
+        runner = CliRunner()
+        db = Db()
+        obj = {'db':db.cfgdb}
+
+        result = runner.invoke(config.config.commands["ntp"], ["add", "10.10.10.x"], obj=obj)
+        print(result.exit_code)
+        print(result.output)
+        assert "Invalid ConfigDB. Error" in result.output
+
+    def test_add_ntp_server_invalid_ip(self):
+        config.ADHOC_VALIDATION = True
+        runner = CliRunner()
+        db = Db()
+        obj = {'db':db.cfgdb}
+
+        result = runner.invoke(config.config.commands["ntp"], ["add", "10.10.10.x"], obj=obj)
+        print(result.exit_code)
+        print(result.output)
+        assert "Invalid IP address" in result.output
+
+    def test_del_ntp_server_invalid_ip(self):
+        config.ADHOC_VALIDATION = True
+        runner = CliRunner()
+        db = Db()
+        obj = {'db':db.cfgdb}
+
+        result = runner.invoke(config.config.commands["ntp"], ["del", "10.10.10.x"], obj=obj)
+        print(result.exit_code)
+        print(result.output)
+        assert "Invalid IP address" in result.output
+
+    @patch("config.main.ConfigDBConnector.get_table", mock.Mock(return_value="10.10.10.10"))
+    @patch("config.validated_config_db_connector.ValidatedConfigDBConnector.validated_set_entry", mock.Mock(side_effect=JsonPatchConflict))
+    @patch("validated_config_db_connector.device_info.is_yang_config_validation_enabled", mock.Mock(return_value=True))
+    def test_del_ntp_server_invalid_ip_yang_validation(self):
+        config.ADHOC_VALIDATION = False
+        runner = CliRunner()
+        db = Db()
+        obj = {'db':db.cfgdb}
+
+        result = runner.invoke(config.config.commands["ntp"], ["del", "10.10.10.10"], obj=obj)
+        print(result.exit_code)
+        print(result.output)
+        assert "Invalid ConfigDB. Error" in result.output
+
+    @classmethod
+    def teardown_class(cls):
+        print("TEARDOWN")
+
+
+class TestConfigPfcwd(object):
+    def setup(self):
+        print("SETUP")
+
+    @patch('utilities_common.cli.run_command')
+    def test_start(self, mock_run_command):
+        runner = CliRunner()
+        result = runner.invoke(config.config.commands['pfcwd'].commands['start'], ['-a', 'forward', '-r', 150, 'Ethernet0', '200', '--verbose'])
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_once_with(['pfcwd', 'start', '--action', 'forward', 'Ethernet0', '200', '--restoration-time', '150'], display_cmd=True)
+
+    @patch('utilities_common.cli.run_command')
+    def test_stop(self, mock_run_command):
+        runner = CliRunner()
+        result = runner.invoke(config.config.commands['pfcwd'].commands['stop'], ['--verbose'])
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_once_with(['pfcwd', 'stop'], display_cmd=True)
+
+    @patch('utilities_common.cli.run_command')
+    def test_interval(self, mock_run_command):
+        runner = CliRunner()
+        result = runner.invoke(config.config.commands['pfcwd'].commands['interval'], ['300', '--verbose'])
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_once_with(['pfcwd', 'interval', '300'], display_cmd=True)
+
+    @patch('utilities_common.cli.run_command')
+    def test_counter_poll(self, mock_run_command):
+        runner = CliRunner()
+        result = runner.invoke(config.config.commands['pfcwd'].commands['counter_poll'], ['enable', '--verbose'])
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_once_with(['pfcwd', 'counter_poll', 'enable'], display_cmd=True)
+
+    @patch('utilities_common.cli.run_command')
+    def test_big_red_switch(self, mock_run_command):
+        runner = CliRunner()
+        result = runner.invoke(config.config.commands['pfcwd'].commands['big_red_switch'], ['enable', '--verbose'])
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_once_with(['pfcwd', 'big_red_switch', 'enable'], display_cmd=True)
+
+    @patch('utilities_common.cli.run_command')
+    def test_start_default(self, mock_run_command):
+        runner = CliRunner()
+        result = runner.invoke(config.config.commands['pfcwd'].commands['start_default'], ['--verbose'])
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_once_with(['pfcwd', 'start_default'], display_cmd=True)
+
+    def teardown(self):
+        print("TEARDOWN")
+
+
+class TestConfigAclUpdate(object):
+    def setup(self):
+        print("SETUP")
+
+    @patch('utilities_common.cli.run_command')
+    def test_full(self, mock_run_command):
+        file_name = '/etc/sonic/full_snmp.json'
+        runner = CliRunner()
+        result = runner.invoke(config.config.commands['acl'].commands['update'].commands['full'], [file_name])
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_once_with(['acl-loader', 'update', 'full', file_name])
+
+    @patch('utilities_common.cli.run_command')
+    def test_incremental(self, mock_run_command):
+        file_name = '/etc/sonic/full_snmp.json'
+        runner = CliRunner()
+        result = runner.invoke(config.config.commands['acl'].commands['update'].commands['incremental'], [file_name])
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_once_with(['acl-loader', 'update', 'incremental', file_name])
+
+    def teardown(self):
+        print("TEARDOWN")
+
+
+class TestConfigDropcounters(object):
+    def setup(self):
+        print("SETUP")
+
+    @patch('utilities_common.cli.run_command')
+    def test_install(self, mock_run_command):
+        counter_name = 'DEBUG_2'
+        counter_type = 'PORT_INGRESS_DROPS'
+        reasons = '[EXCEEDS_L2_MTU,DECAP_ERROR]'
+        alias = 'BAD_DROPS'
+        group = 'BAD'
+        desc = 'more port ingress drops'
+
+        runner = CliRunner()
+        result = runner.invoke(config.config.commands['dropcounters'].commands['install'], [counter_name, counter_type, reasons, '-d', desc, '-g', group, '-a', alias])
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_once_with(['dropconfig', '-c', 'install', '-n', str(counter_name), '-t', str(counter_type), '-r', str(reasons), '-a', str(alias), '-g', str(group), '-d', str(desc)], display_cmd=False)
+
+    @patch('utilities_common.cli.run_command')
+    def test_delete(self, mock_run_command):
+        counter_name = 'DEBUG_2'
+        runner = CliRunner()
+        result = runner.invoke(config.config.commands['dropcounters'].commands['delete'], [counter_name, '-v'])
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_once_with(['dropconfig', '-c', 'uninstall', '-n', str(counter_name)], display_cmd=True)
+
+    @patch('utilities_common.cli.run_command')
+    def test_add_reasons(self, mock_run_command):
+        counter_name = 'DEBUG_2'
+        reasons = '[EXCEEDS_L2_MTU,DECAP_ERROR]'
+        runner = CliRunner()
+        result = runner.invoke(config.config.commands['dropcounters'].commands['add-reasons'], [counter_name, reasons, '-v'])
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_once_with(['dropconfig', '-c', 'add', '-n', str(counter_name), '-r', str(reasons)], display_cmd=True)
+
+    @patch('utilities_common.cli.run_command')
+    def test_remove_reasons(self, mock_run_command):
+        counter_name = 'DEBUG_2'
+        reasons = '[EXCEEDS_L2_MTU,DECAP_ERROR]'
+        runner = CliRunner()
+        result = runner.invoke(config.config.commands['dropcounters'].commands['remove-reasons'], [counter_name, reasons, '-v'])
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_once_with(['dropconfig', '-c', 'remove', '-n', str(counter_name), '-r', str(reasons)], display_cmd=True)
+
+    def teardown(self):
+        print("TEARDOWN")
+
+
+class TestConfigWatermarkTelemetry(object):
+    def setup(self):
+        print("SETUP")
+
+    @patch('utilities_common.cli.run_command')
+    def test_interval(self, mock_run_command):
+        interval = '18'
+        runner = CliRunner()
+        result = runner.invoke(config.config.commands['watermark'].commands['telemetry'].commands['interval'], [interval])
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_once_with(['watermarkcfg', '--config-interval', str(interval)])
+
+    def teardown(self):
+        print("TEARDOWN")
+
+
+class TestConfigZtp(object):
+    def setup(self):
+        print("SETUP")
+
+    @patch('utilities_common.cli.run_command')
+    def test_run(self, mock_run_command):
+        runner = CliRunner()
+        result = runner.invoke(config.config.commands['ztp'].commands['run'], ['-y'])
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_once_with(['ztp', 'run', '-y'], display_cmd=True)
+
+    @patch('utilities_common.cli.run_command')
+    def test_disable(self, mock_run_command):
+        runner = CliRunner()
+        result = runner.invoke(config.config.commands['ztp'].commands['disable'], ['-y'])
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_once_with(['ztp', 'disable', '-y'], display_cmd=True)
+
+    @patch('utilities_common.cli.run_command')
+    def test_enable(self, mock_run_command):
+        runner = CliRunner()
+        result = runner.invoke(config.config.commands['ztp'].commands['enable'])
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_once_with(['ztp', 'enable'], display_cmd=True)
+
+    def teardown(self):
+        print("TEARDOWN")
+
+
+@patch('utilities_common.cli.run_command')
+@patch('os.uname', MagicMock(return_value=['Linux', 'current-hostname', '5.11.0-34-generic', '#36~20.04.1-Ubuntu SMP Thu Aug 5 14:22:16 UTC 2021', 'x86_64']))
+def test_change_hostname(mock_run_command):
+    new_hostname = 'new_hostname'
+    with patch('builtins.open', mock_open()) as mock_file:
+        config._change_hostname(new_hostname)
+
+    assert mock_file.call_args_list == [
+        call('/etc/hostname', 'w'),
+        call('/etc/hosts', 'a')
+    ]
+    assert mock_file().write.call_args_list == [
+        call('new_hostname\n'),
+        call('127.0.0.1 new_hostname\n')
+    ]
+    assert mock_run_command.call_args_list == [
+        call(['hostname', '-F', '/etc/hostname'], display_cmd=True),
+        call(['sed', '-i', r"/\scurrent-hostname$/d", '/etc/hosts'], display_cmd=True)
+    ]
+
+
+class TestConfigInterface(object):
+    def setup(self):
+        print("SETUP")
+
+    @patch('utilities_common.cli.run_command')
+    def test_speed(self, mock_run_command):
+        interface_name = 'Ethernet0'
+        interface_speed = '100'
+        db = Db()
+        runner = CliRunner()
+
+        obj = {'config_db': db.cfgdb, 'namespace': ''}
+        result = runner.invoke(config.config.commands['interface'].commands['speed'], [interface_name, interface_speed, '--verbose'], obj=obj)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_with(['portconfig', '-p', str(interface_name), '-s', str(interface_speed), '-vv'], display_cmd=True)
+
+        obj = {'config_db': db.cfgdb, 'namespace': 'ns'}
+        result = runner.invoke(config.config.commands['interface'].commands['speed'], [interface_name, interface_speed, '--verbose'], obj=obj)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_with(['portconfig', '-p', str(interface_name), '-s', str(interface_speed), '-n', 'ns', '-vv'], display_cmd=True)
+
+    @patch('utilities_common.cli.run_command')
+    def test_link_training(self, mock_run_command):
+        interface_name = 'Ethernet0'
+        mode = 'on'
+        db = Db()
+        runner = CliRunner()
+
+        obj = {'config_db': db.cfgdb, 'namespace': ''}
+        result = runner.invoke(config.config.commands['interface'].commands['link-training'], [interface_name, mode, '--verbose'], obj=obj)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_with(['portconfig', '-p', str(interface_name), '-lt', str(mode), '-vv'], display_cmd=True)
+
+        obj = {'config_db': db.cfgdb, 'namespace': 'ns'}
+        result = runner.invoke(config.config.commands['interface'].commands['link-training'], [interface_name, mode, '--verbose'], obj=obj)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_with(['portconfig', '-p', str(interface_name), '-lt', str(mode), '-n', 'ns', '-vv'], display_cmd=True)
+
+    @patch('utilities_common.cli.run_command')
+    def test_advertised_speeds(self, mock_run_command):
+        interface_name = 'Ethernet0'
+        speed_list = '50,100'
+        db = Db()
+        runner = CliRunner()
+
+        obj = {'config_db': db.cfgdb, 'namespace': ''}
+        result = runner.invoke(config.config.commands['interface'].commands['advertised-speeds'], [interface_name, speed_list, '--verbose'], obj=obj)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_with(['portconfig', '-p', str(interface_name), '-S', str(speed_list), '-vv'], display_cmd=True)
+
+        obj = {'config_db': db.cfgdb, 'namespace': 'ns'}
+        result = runner.invoke(config.config.commands['interface'].commands['advertised-speeds'], [interface_name, speed_list, '--verbose'], obj=obj)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_with(['portconfig', '-p', str(interface_name), '-S', str(speed_list), '-n', 'ns', '-vv'], display_cmd=True)
+
+    @patch('utilities_common.cli.run_command')
+    def test_advertised_types(self, mock_run_command):
+        interface_name = 'Ethernet0'
+        interface_type = 'CR,CR4'
+        db = Db()
+        runner = CliRunner()
+
+        obj = {'config_db': db.cfgdb, 'namespace': ''}
+        result = runner.invoke(config.config.commands['interface'].commands['advertised-types'], [interface_name, interface_type, '--verbose'], obj=obj)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_with(['portconfig', '-p', str(interface_name), '-T', str(interface_type), '-vv'], display_cmd=True)
+
+        obj = {'config_db': db.cfgdb, 'namespace': 'ns'}
+        result = runner.invoke(config.config.commands['interface'].commands['advertised-types'], [interface_name, interface_type, '--verbose'], obj=obj)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_with(['portconfig', '-p', str(interface_name), '-T', str(interface_type), '-n', 'ns', '-vv'], display_cmd=True)
+
+    @patch('utilities_common.cli.run_command')
+    def test_mtu(self, mock_run_command):
+        interface_name = 'Ethernet0'
+        interface_mtu = '1000'
+        db = Db()
+        runner = CliRunner()
+
+        obj = {'config_db': db.cfgdb, 'namespace': ''}
+        result = runner.invoke(config.config.commands['interface'].commands['mtu'], [interface_name, interface_mtu, '--verbose'], obj=obj)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_with(['portconfig', '-p', str(interface_name), '-m', str(interface_mtu), '-vv'], display_cmd=True)
+
+        obj = {'config_db': db.cfgdb, 'namespace': 'ns'}
+        result = runner.invoke(config.config.commands['interface'].commands['mtu'], [interface_name, interface_mtu, '--verbose'], obj=obj)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_with(['portconfig', '-p', str(interface_name), '-m', str(interface_mtu), '-n', 'ns', '-vv'], display_cmd=True)
+
+    @patch('utilities_common.cli.run_command')
+    def test_tpid(self, mock_run_command):
+        interface_name = 'Ethernet0'
+        interface_tpid = '0x9200'
+        db = Db()
+        runner = CliRunner()
+
+        obj = {'config_db': db.cfgdb, 'namespace': ''}
+        result = runner.invoke(config.config.commands['interface'].commands['tpid'], [interface_name, interface_tpid, '--verbose'], obj=obj)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_with(['portconfig', '-p', str(interface_name), '-tp', str(interface_tpid), '-vv'], display_cmd=True)
+
+        obj = {'config_db': db.cfgdb, 'namespace': 'ns'}
+        result = runner.invoke(config.config.commands['interface'].commands['tpid'], [interface_name, interface_tpid, '--verbose'], obj=obj)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_with(['portconfig', '-p', str(interface_name), '-tp', str(interface_tpid), '-n', 'ns', '-vv'], display_cmd=True)
+
+    @patch('utilities_common.cli.run_command')
+    def test_fec(self, mock_run_command):
+        interface_name = 'Ethernet0'
+        interface_fec = 'rs'
+        db = Db()
+        runner = CliRunner()
+
+        obj = {'config_db': db.cfgdb, 'namespace': ''}
+        result = runner.invoke(config.config.commands['interface'].commands['fec'], [interface_name, interface_fec, '--verbose'], obj=obj)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_with(['portconfig', '-p', str(interface_name), '-f', str(interface_fec), '-vv'], display_cmd=True)
+
+        obj = {'config_db': db.cfgdb, 'namespace': 'ns'}
+        result = runner.invoke(config.config.commands['interface'].commands['fec'], [interface_name, interface_fec, '--verbose'], obj=obj)
+        assert result.exit_code == 0
+        mock_run_command.assert_called_with(['portconfig', '-p', str(interface_name), '-f', str(interface_fec), '-n', 'ns', '-vv'], display_cmd=True)
+
+    def teardown(self):
+        print("TEARDOWN")
+
+
+class TestConfigClock(object):
+    timezone_test_val = ['Europe/Kyiv', 'Asia/Israel', 'UTC']
+
+    @classmethod
+    def setup_class(cls):
+        print('SETUP')
+        import config.main
+        importlib.reload(config.main)
+
+    @patch('config.main.get_tzs', mock.Mock(return_value=timezone_test_val))
+    def test_timezone_good(self):
+        runner = CliRunner()
+        obj = {'db': Db().cfgdb}
+
+        result = runner.invoke(
+            config.config.commands['clock'].commands['timezone'],
+            ['UTC'], obj=obj)
+
+        assert result.exit_code == 0
+
+    @patch('config.main.get_tzs', mock.Mock(return_value=timezone_test_val))
+    def test_timezone_bad(self):
+        runner = CliRunner()
+        obj = {'db': Db().cfgdb}
+
+        result = runner.invoke(
+            config.config.commands['clock'].commands['timezone'],
+            ['Atlantis'], obj=obj)
+
+        assert result.exit_code != 0
+        assert 'Timezone Atlantis does not conform format' in result.output
+
+    @patch('utilities_common.cli.run_command',
+           mock.MagicMock(side_effect=mock_run_command_side_effect))
+    def test_date_good(self):
+        runner = CliRunner()
+        obj = {'db': Db().cfgdb}
+
+        result = runner.invoke(
+            config.config.commands['clock'].commands['date'],
+            ['2020-10-10', '10:20:30'], obj=obj)
+
+        assert result.exit_code == 0
+
+    @patch('utilities_common.cli.run_command',
+           mock.MagicMock(side_effect=mock_run_command_side_effect))
+    def test_date_bad(self):
+        runner = CliRunner()
+        obj = {'db': Db().cfgdb}
+
+        result = runner.invoke(
+            config.config.commands['clock'].commands['date'],
+            ['20-10-10', '60:70:80'], obj=obj)
+
+        assert result.exit_code != 0
+        assert 'Date 20-10-10 does not conform format' in result.output
+        assert 'Time 60:70:80 does not conform format' in result.output
+
+    @classmethod
+    def teardown_class(cls):
+        print('TEARDOWN')
