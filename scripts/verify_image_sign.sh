@@ -2,24 +2,9 @@
 image_file="${1}"
 cms_sig_file="sig.cms"
 lines_for_lookup=50
-SECURE_UPGRADE_ENABLED=0
 DIR="$(dirname "$0")"
-if [ -d "/sys/firmware/efi/efivars" ]; then
-    if ! [ -n "$(ls -A /sys/firmware/efi/efivars 2>/dev/null)" ]; then
-        mount -t efivarfs none /sys/firmware/efi/efivars 2>/dev/null
-    fi
-    SECURE_UPGRADE_ENABLED=$(bootctl status 2>/dev/null | grep -c "Secure Boot: enabled")
-else
-    echo "efi not supported - exiting without verification"
-    exit 0
-fi
 
 . /usr/local/bin/verify_image_sign_common.sh
-
-if [ ${SECURE_UPGRADE_ENABLED} -eq 0 ]; then
-    echo "secure boot not enabled - exiting without image verification"
-    exit 0
-fi
 
 clean_up ()
 {

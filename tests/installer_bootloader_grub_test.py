@@ -93,6 +93,6 @@ def test_verify_image():
 
     bootloader = grub.GrubBootloader()
     image = f'{grub.IMAGE_PREFIX}expeliarmus-{grub.IMAGE_PREFIX}abcde'
-
+    assert bootloader.is_secure_upgrade_image_verification_supported()
     # command should fail
     assert not bootloader.verify_image_sign(image)

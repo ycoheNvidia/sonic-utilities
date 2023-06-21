@@ -153,6 +153,30 @@ class GrubBootloader(OnieInstallerBootloader):
         # Check if platform is inside image's target platforms
         return self.platform_in_platforms_asic(platform, image_path)
 
+    def is_secure_upgrade_image_verification_supported(self):
+
+        check_if_verification_is_enabled_and_supported_code = '''
+        SECURE_UPGRADE_ENABLED=0
+        if [ -d "/sys/firmware/efi/efivars" ]; then
+            if ! [ -n "$(ls -A /sys/firmware/efi/efivars 2>/dev/null)" ]; then
+                mount -t efivarfs none /sys/firmware/efi/efivars 2>/dev/null
+            fi
+            SECURE_UPGRADE_ENABLED=$(bootctl status 2>/dev/null | grep -c "Secure Boot: enabled")
+        else
+            echo "efi not supported - exiting without verification"
+            exit 1
+        fi
+
+        if [ ${SECURE_UPGRADE_ENABLED} -eq 0 ]; then
+            echo "secure boot not enabled - exiting without image verification"
+            exit 1
+        fi
+        exit 0
+        '''
+        verification_result = subprocess.run(['bash', '-c', check_if_verification_is_enabled_and_supported_code], check=True, capture_output=True)
+        click.echo(str(verification_result.stdout) + " " + str(verification_result.stderr))
+        return verification_result.returncode == 0
+
     def verify_image_sign(self, image_path):
         click.echo('Verifying image signature')
         verification_script_name = 'verify_image_sign.sh'

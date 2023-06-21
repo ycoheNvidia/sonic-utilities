@@ -96,9 +96,10 @@ def test_set_fips_aboot():
 def test_verify_image_sign():
     bootloader = aboot.AbootBootloader()
     return_value = None
+    is_supported = bootloader.is_secure_upgrade_image_verification_supported()
     try:
         return_value = bootloader.verify_image_sign(exp_image)
     except NotImplementedError:
-        pass
+        assert not is_supported
     else:
         assert False, "Wrong return value from verify_image_sign, returned" + str(return_value)
