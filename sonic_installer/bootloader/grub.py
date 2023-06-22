@@ -173,8 +173,8 @@ class GrubBootloader(OnieInstallerBootloader):
         fi
         exit 0
         '''
-        verification_result = subprocess.run(['bash', '-c', check_if_verification_is_enabled_and_supported_code], check=True, capture_output=True)
-        click.echo(str(verification_result.stdout) + " " + str(verification_result.stderr))
+        verification_result = subprocess.run(['bash', '-c', check_if_verification_is_enabled_and_supported_code], capture_output=True)
+        click.echo(verification_result.stdout.decode())
         return verification_result.returncode == 0
 
     def verify_image_sign(self, image_path):
@@ -185,7 +185,7 @@ class GrubBootloader(OnieInstallerBootloader):
             click.echo("Unable to find verification script in path " + script_path)
             return False
         verification_result = subprocess.run([script_path, image_path], capture_output=True)
-        click.echo(str(verification_result.stdout) + " " + str(verification_result.stderr))
+        click.echo(verification_result.stdout.decode())
         return verification_result.returncode == 0
 
     @classmethod
