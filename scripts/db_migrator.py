@@ -594,17 +594,23 @@ class DBMigrator():
         Handle route table migration. Migrations handled:
         1. 'weight' attr in ROUTE object was introduced 202205 onwards.
             Upgrade from older branch to 202205 will require this 'weight' attr to be added explicitly
+        2. 'protocol' attr in ROUTE introduced in 202305 onwards.
+            WarmRestartHelper reconcile logic requires to have "protocol" field in the old dumped ROUTE_TABLE.
         """
         route_table = self.appDB.get_table("ROUTE_TABLE")
         for route_prefix, route_attr in route_table.items():
+            if type(route_prefix) == tuple:
+                # IPv6 route_prefix is returned from db as tuple
+                route_key = "ROUTE_TABLE:" + ":".join(route_prefix)
+            else:
+                # IPv4 route_prefix is returned from db as str
+                route_key = "ROUTE_TABLE:{}".format(route_prefix)
+
             if 'weight' not in route_attr:
-                if type(route_prefix) == tuple:
-                    # IPv6 route_prefix is returned from db as tuple
-                    route_key = "ROUTE_TABLE:" + ":".join(route_prefix)
-                else:
-                    # IPv4 route_prefix is returned from db as str
-                    route_key = "ROUTE_TABLE:{}".format(route_prefix)
                 self.appDB.set(self.appDB.APPL_DB, route_key, 'weight','')
+
+            if 'protocol' not in route_attr:
+                self.appDB.set(self.appDB.APPL_DB, route_key, 'protocol', '')
 
     def update_edgezone_aggregator_config(self):
         """
@@ -649,6 +655,20 @@ class DBMigrator():
             if intf in edgezone_aggregator_intfs:
                 # Set new cable length values
                 self.configDB.set(self.configDB.CONFIG_DB, "CABLE_LENGTH|AZURE", intf, EDGEZONE_AGG_CABLE_LENGTH)
+
+    def migrate_config_db_flex_counter_delay_status(self):
+        """
+        Migrate "FLEX_COUNTER_TABLE|*": { "value": { "FLEX_COUNTER_DELAY_STATUS": "false" } }
+        Set FLEX_COUNTER_DELAY_STATUS true in case of fast-reboot
+        """
+
+        flex_counter_objects = self.configDB.get_keys('FLEX_COUNTER_TABLE')
+        for obj in flex_counter_objects:
+            flex_counter = self.configDB.get_entry('FLEX_COUNTER_TABLE', obj)
+            delay_status = flex_counter.get('FLEX_COUNTER_DELAY_STATUS')
+            if delay_status is None or delay_status == 'false':
+                flex_counter['FLEX_COUNTER_DELAY_STATUS'] = 'true'
+                self.configDB.mod_entry('FLEX_COUNTER_TABLE', obj, flex_counter)
 
     def version_unknown(self):
         """
@@ -948,9 +968,21 @@ class DBMigrator():
     def version_4_0_2(self):
         """
         Version 4_0_2.
-        This is the latest version for master branch
         """
         log.log_info('Handling version_4_0_2')
+
+        if self.stateDB.keys(self.stateDB.STATE_DB, "FAST_REBOOT|system"):
+            self.migrate_config_db_flex_counter_delay_status()
+
+        self.set_version('version_4_0_3')
+        return 'version_4_0_3'
+
+    def version_4_0_3(self):
+        """
+        Version 4_0_3.
+        This is the latest version for master branch
+        """
+        log.log_info('Handling version_4_0_3')
         return None
 
     def get_version(self):
